@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vaen-agent"
+version = "0.1.0"
+description = "Portable OCI-backed agent bundle builder."
+requires-python = ">=3.11"
+dependencies = [
+    "oras",
+    "PyYAML",
+]
+
+[project.scripts]
+vaen = "vaen.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
