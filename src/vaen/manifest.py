@@ -3,23 +3,31 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 from .errors import ManifestError, ManifestValidationError
 
 _DEFAULT_MANIFEST_NAME = "agent.yaml"
-_ALLOWED_ARTIFACT_TYPES = {"instructions", "skills"}
+_ALLOWED_ARTIFACT_TYPES = {"skills"}
 _ALLOWED_INSTRUCTION_KEYS = {"main", "includes"}
 _ALLOWED_ARTIFACT_KEYS = {"type", "path"}
+
+
+@dataclass(frozen=True, slots=True)
+class BundledPath:
+    """A resolved local source path plus its sanitized bundle-relative path."""
+
+    source_path: Path
+    bundle_path: PurePosixPath
 
 
 @dataclass(frozen=True, slots=True)
 class InstructionsSpec:
     """Top-level instructions definition for an agent bundle."""
 
-    main: str
-    includes: tuple[str, ...] = ()
+    main: BundledPath
+    includes: tuple[BundledPath, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,7 +35,8 @@ class ArtifactSpec:
     """A bundled artifact referenced by the manifest."""
 
     type: str
-    path: str
+    source_path: Path
+    bundle_path: PurePosixPath
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,7 +49,19 @@ class Manifest:
     artifacts: tuple[ArtifactSpec, ...]
     required_vars: tuple[str, ...] = ()
     source_path: Path | None = None
+    source_root: Path | None = None
     extra: Mapping[str, Any] = field(default_factory=dict)
+
+    def normalized_bundle_paths(self) -> dict[str, Any]:
+        """Return bundle-relative paths only, excluding local source paths."""
+
+        return {
+            "instructions": {
+                "main": str(self.instructions.main.bundle_path),
+                "includes": [str(item.bundle_path) for item in self.instructions.includes],
+            },
+            "skills": [str(artifact.bundle_path) for artifact in self.artifacts],
+        }
 
 
 def discover_manifest(start: str | Path = ".", filename: str = _DEFAULT_MANIFEST_NAME) -> Path:
@@ -79,11 +100,12 @@ def load_manifest(
             return None
         manifest_path = discovered
 
-    manifest_path = Path(manifest_path)
+    manifest_path = Path(manifest_path).expanduser()
     if not manifest_path.is_file():
         if required:
             raise ManifestError(f"Missing manifest: {manifest_path}")
         return None
+    manifest_path = manifest_path.resolve()
 
     document = _read_yaml_document(manifest_path)
     if not isinstance(document, Mapping):
@@ -107,8 +129,9 @@ def _read_yaml_document(manifest_path: Path) -> Any:
 def _manifest_from_mapping(mapping: Mapping[str, Any], *, source_path: Path) -> Manifest:
     version = _require_string(mapping, "version")
     publisher = _require_string(mapping, "publisher")
-    instructions = _parse_instructions(mapping.get("instructions"))
-    artifacts = _parse_artifacts(mapping.get("artifacts"))
+    source_root = source_path.parent
+    instructions = _parse_instructions(mapping.get("instructions"), source_root)
+    artifacts = _parse_artifacts(mapping.get("artifacts"), source_root)
     required_vars = _parse_required_vars(mapping.get("requiredVars"))
 
     extra = {
@@ -124,11 +147,12 @@ def _manifest_from_mapping(mapping: Mapping[str, Any], *, source_path: Path) -> 
         artifacts=artifacts,
         required_vars=required_vars,
         source_path=source_path,
+        source_root=source_root,
         extra=extra,
     )
 
 
-def _parse_instructions(raw: Any) -> InstructionsSpec:
+def _parse_instructions(raw: Any, source_root: Path) -> InstructionsSpec:
     if not isinstance(raw, Mapping):
         raise ManifestValidationError("instructions must be a mapping with main/includes")
 
@@ -145,20 +169,37 @@ def _parse_instructions(raw: Any) -> InstructionsSpec:
     if not isinstance(includes_raw, list):
         raise ManifestValidationError("instructions.includes must be a list of strings")
 
-    includes: list[str] = []
+    includes: list[BundledPath] = []
     for index, include in enumerate(includes_raw):
         if not isinstance(include, str) or not include.strip():
             raise ManifestValidationError(
                 f"instructions.includes[{index}] must be a non-empty string"
             )
-        includes.append(include)
+        includes.append(
+            BundledPath(
+                source_path=_resolve_existing_file(
+                    include,
+                    source_root,
+                    context=f"instructions.includes[{index}]",
+                ),
+                bundle_path=PurePosixPath("instructions", "includes", Path(include).name),
+            )
+        )
 
-    return InstructionsSpec(main=main, includes=tuple(includes))
+    return InstructionsSpec(
+        main=BundledPath(
+            source_path=_resolve_existing_file(main, source_root, context="instructions.main"),
+            bundle_path=PurePosixPath("instructions", "main", Path(main).name),
+        ),
+        includes=tuple(includes),
+    )
 
 
-def _parse_artifacts(raw: Any) -> tuple[ArtifactSpec, ...]:
-    if not isinstance(raw, list) or not raw:
-        raise ManifestValidationError("artifacts must be a non-empty list")
+def _parse_artifacts(raw: Any, source_root: Path) -> tuple[ArtifactSpec, ...]:
+    if not isinstance(raw, list):
+        raise ManifestValidationError("artifacts must be a list")
+    if not raw:
+        return ()
 
     artifacts: list[ArtifactSpec] = []
     for index, item in enumerate(raw):
@@ -178,7 +219,18 @@ def _parse_artifacts(raw: Any) -> tuple[ArtifactSpec, ...]:
             )
 
         artifact_path = _require_string(item, "path", context=f"artifacts[{index}]")
-        artifacts.append(ArtifactSpec(type=artifact_type, path=artifact_path))
+        source_path = _resolve_existing_directory(
+            artifact_path,
+            source_root,
+            context=f"artifacts[{index}].path",
+        )
+        artifacts.append(
+            ArtifactSpec(
+                type=artifact_type,
+                source_path=source_path,
+                bundle_path=PurePosixPath("skills", source_path.name),
+            )
+        )
 
     return tuple(artifacts)
 
@@ -211,3 +263,24 @@ def _require_string(
     if not isinstance(value, str) or not value.strip():
         raise ManifestValidationError(f"{label} must be a non-empty string")
     return value
+
+
+def _resolve_existing_file(raw_path: str, source_root: Path, *, context: str) -> Path:
+    candidate = _resolve_source_path(raw_path, source_root)
+    if not candidate.is_file():
+        raise ManifestValidationError(f"{context} must reference an existing file")
+    return candidate
+
+
+def _resolve_existing_directory(raw_path: str, source_root: Path, *, context: str) -> Path:
+    candidate = _resolve_source_path(raw_path, source_root)
+    if not candidate.is_dir():
+        raise ManifestValidationError(f"{context} must reference an existing directory")
+    return candidate
+
+
+def _resolve_source_path(raw_path: str, source_root: Path) -> Path:
+    path = Path(raw_path).expanduser()
+    if not path.is_absolute():
+        path = source_root / path
+    return path.resolve()
