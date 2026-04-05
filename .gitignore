@@ -3,4 +3,5 @@ __pycache__/
 .venv/
 *.pyc
 *.agent
+*.egg-info/
 *.md
