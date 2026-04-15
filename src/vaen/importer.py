@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import io
 import json
+import re
+import shutil
 import tarfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -14,6 +16,7 @@ from .errors import BundleImportError
 _METADATA_PATH = "vaen/metadata.json"
 _ROOT_SHIMS = ("AGENTS.md", "CLAUDE.md")
 _SKILL_MIRROR_ROOTS = ((".agent", "skills"), (".claude", "skills"))
+_REPO_SAFE_TOKEN_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +37,80 @@ class ImportPlan:
     included_instructions: tuple[PurePosixPath, ...]
     skills: tuple[SkillPlan, ...]
     layer_files: tuple[PurePosixPath, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ImportTargetOverrides:
+    """Validated optional import-target overrides from CLI flags."""
+
+    target_name: str | None = None
+    instruction_filename: str | None = None
+    skills_directory_name: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ActivatedImportPaths:
+    """Derived activated output paths for root instructions and mirrored skills."""
+
+    root_instruction_paths: tuple[Path, ...]
+    skills_mirror_roots: tuple[Path, ...]
+
+
+def validate_import_target_name(raw: str) -> str:
+    """Validate `--target` name as repo-safe lowercase/number/hyphen."""
+
+    return _validate_repo_safe_token(raw, field_label="target")
+
+
+def validate_instruction_filename_stem(raw: str) -> str:
+    """Validate instruction filename stem and return `<stem>.md`."""
+
+    stem = _validate_repo_safe_token(raw, field_label="target-instructions-file-name")
+    return f"{stem}.md"
+
+
+def validate_target_skills_directory_name(raw: str) -> str:
+    """Validate `--target-skills-directory` as repo-safe token."""
+
+    return _validate_repo_safe_token(raw, field_label="target-skills-directory")
+
+
+def resolve_import_target_overrides(
+    target: str | None = None,
+    *,
+    target_instructions_file_name: str | None = None,
+    target_skills_directory: str | None = None,
+) -> ImportTargetOverrides:
+    """Resolve validated target overrides and derived defaults.
+
+    This helper is policy-only for later import wiring and does not mutate
+    filesystem behavior in this step.
+    """
+
+    validated_target = (
+        validate_import_target_name(target) if target is not None else None
+    )
+    validated_instruction_filename = (
+        validate_instruction_filename_stem(target_instructions_file_name)
+        if target_instructions_file_name is not None
+        else None
+    )
+    validated_skills_directory = (
+        validate_target_skills_directory_name(target_skills_directory)
+        if target_skills_directory is not None
+        else None
+    )
+
+    if validated_instruction_filename is None and validated_target is not None:
+        validated_instruction_filename = f"{validated_target.upper()}.md"
+    if validated_skills_directory is None and validated_target is not None:
+        validated_skills_directory = validated_target
+
+    return ImportTargetOverrides(
+        target_name=validated_target,
+        instruction_filename=validated_instruction_filename,
+        skills_directory_name=validated_skills_directory,
+    )
 
 
 def resolve_import_target(
@@ -86,25 +163,58 @@ def ensure_canonical_destination_available(
     return destination
 
 
-def root_shim_paths(target_repo: str | Path) -> tuple[Path, Path]:
-    """Return target-repo root shim paths: AGENTS.md and CLAUDE.md."""
+def derive_activated_paths(
+    target_repo: str | Path,
+    overrides: ImportTargetOverrides | None = None,
+) -> ActivatedImportPaths:
+    """Derive activated output paths from optional import target overrides.
+
+    Canonical extraction remains fixed at `.agent/<bundle-name>` and is not
+    affected by these activated-output derivations.
+    """
 
     repo_root = resolve_import_target(target_repo)
-    return (repo_root / _ROOT_SHIMS[0], repo_root / _ROOT_SHIMS[1])
+    active_overrides = overrides or ImportTargetOverrides()
+
+    if active_overrides.instruction_filename is not None:
+        root_instruction_paths = (repo_root / active_overrides.instruction_filename,)
+    else:
+        root_instruction_paths = tuple(repo_root / name for name in _ROOT_SHIMS)
+
+    if active_overrides.skills_directory_name is not None:
+        skills_mirror_roots = (
+            repo_root / f".{active_overrides.skills_directory_name}" / "skills",
+        )
+    else:
+        skills_mirror_roots = tuple(
+            repo_root / root_tokens[0] / root_tokens[1]
+            for root_tokens in _SKILL_MIRROR_ROOTS
+        )
+
+    return ActivatedImportPaths(
+        root_instruction_paths=root_instruction_paths,
+        skills_mirror_roots=skills_mirror_roots,
+    )
 
 
-def ensure_root_shims_available(target_repo: str | Path) -> tuple[Path, Path]:
-    """Raise if AGENTS.md or CLAUDE.md already exists at repo root."""
+def ensure_root_shims_available(
+    target_repo: str | Path,
+    overrides: ImportTargetOverrides | None = None,
+) -> tuple[Path, ...]:
+    """Raise if any configured root instruction output path already exists."""
 
-    agents_path, claude_path = root_shim_paths(target_repo)
-    existing = [path for path in (agents_path, claude_path) if path.exists()]
+    root_paths = derive_activated_paths(
+        target_repo=target_repo,
+        overrides=overrides,
+    ).root_instruction_paths
+    existing = [path for path in root_paths if path.exists()]
     if existing:
         rendered = ", ".join(str(path) for path in existing)
         raise BundleImportError(
             f"Root instruction shim already exists: {rendered}. "
             "Refusing to overwrite root instruction files."
         )
-    return (agents_path, claude_path)
+    return root_paths
 
 
 def prepare_import_plan(archive_path: str | Path) -> ImportPlan:
@@ -168,19 +278,52 @@ def extract_canonical_bundle(
     return destination
 
 
+def cleanup_canonical_bundle(
+    archive_path: str | Path,
+    target_repo: str | Path | None = None,
+    *,
+    start: str | Path = ".",
+) -> Path:
+    """Delete only canonical ``.agent/<bundle-name>`` for an imported archive."""
+
+    repo_root = resolve_import_target(target_repo, start=start)
+    destination = canonical_bundle_destination(repo_root, archive_path)
+    canonical_root = (repo_root / ".agent").resolve()
+
+    if destination.parent != canonical_root:
+        raise BundleImportError(
+            "Refusing cleanup: resolved canonical destination is outside `.agent` root."
+        )
+    if not destination.exists():
+        raise BundleImportError(
+            f"Canonical bundle directory not found for cleanup: {destination}"
+        )
+    if not destination.is_dir():
+        raise BundleImportError(
+            f"Refusing cleanup: canonical destination is not a directory: {destination}"
+        )
+
+    shutil.rmtree(destination)
+    return destination
+
+
 def create_root_instruction_shims(
     canonical_destination: str | Path,
     plan: ImportPlan,
     target_repo: str | Path,
-) -> tuple[Path, Path]:
-    """Create identical root AGENTS.md and CLAUDE.md from main instruction.
+    overrides: ImportTargetOverrides | None = None,
+) -> tuple[Path, ...]:
+    """Create identical root instruction shims from main instruction.
 
     The canonical bundle must already be extracted under ``canonical_destination``.
     This function writes only the root instruction shims and does not perform
     any skill mirroring or additional import orchestration.
     """
 
-    agents_path, claude_path = ensure_root_shims_available(target_repo)
+    root_paths = ensure_root_shims_available(
+        target_repo=target_repo,
+        overrides=overrides,
+    )
     canonical_root = Path(canonical_destination).expanduser().resolve()
     source_instruction = canonical_root / Path(plan.main_instruction.as_posix())
     if not source_instruction.is_file():
@@ -190,17 +333,18 @@ def create_root_instruction_shims(
         )
 
     content = source_instruction.read_bytes()
-    agents_path.write_bytes(content)
-    claude_path.write_bytes(content)
-    return (agents_path, claude_path)
+    for path in root_paths:
+        path.write_bytes(content)
+    return root_paths
 
 
 def mirror_imported_skills(
     canonical_destination: str | Path,
     plan: ImportPlan,
     target_repo: str | Path,
-) -> tuple[Path, Path]:
-    """Mirror imported skills into `.agent/skills` and `.claude/skills`.
+    overrides: ImportTargetOverrides | None = None,
+) -> tuple[Path, ...]:
+    """Mirror imported skills into derived activated mirror roots.
 
     This function performs file-copy behavior only. Collision policy is handled
     separately by later import tasks.
@@ -208,16 +352,17 @@ def mirror_imported_skills(
 
     canonical_root = Path(canonical_destination).expanduser().resolve()
     repo_root = resolve_import_target(target_repo)
-    agent_skills_root = repo_root / _SKILL_MIRROR_ROOTS[0][0] / _SKILL_MIRROR_ROOTS[0][1]
-    claude_skills_root = repo_root / _SKILL_MIRROR_ROOTS[1][0] / _SKILL_MIRROR_ROOTS[1][1]
+    mirror_roots = derive_activated_paths(
+        target_repo=repo_root,
+        overrides=overrides,
+    ).skills_mirror_roots
 
     for skill in plan.skills:
         if len(skill.root.parts) < 2:
             raise BundleImportError(f"Invalid skill root in import plan: {skill.root}")
         skill_name = skill.root.parts[1]
-        agent_skill_root = agent_skills_root / skill_name
-        claude_skill_root = claude_skills_root / skill_name
-        existing = [path for path in (agent_skill_root, claude_skill_root) if path.exists()]
+        per_root_skill_paths = tuple(root / skill_name for root in mirror_roots)
+        existing = [path for path in per_root_skill_paths if path.exists()]
         if existing:
             rendered = ", ".join(str(path) for path in existing)
             raise BundleImportError(
@@ -231,15 +376,13 @@ def mirror_imported_skills(
                     f"Canonical skill file is missing: {source_file}"
                 )
             relative = file_path.relative_to(skill.root)
-            agent_target = agent_skill_root / Path(relative.as_posix())
-            claude_target = claude_skill_root / Path(relative.as_posix())
-            agent_target.parent.mkdir(parents=True, exist_ok=True)
-            claude_target.parent.mkdir(parents=True, exist_ok=True)
             payload = source_file.read_bytes()
-            agent_target.write_bytes(payload)
-            claude_target.write_bytes(payload)
+            for skill_root in per_root_skill_paths:
+                target = skill_root / Path(relative.as_posix())
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(payload)
 
-    return (agent_skills_root, claude_skills_root)
+    return mirror_roots
 
 
 def _read_layer_blob(archive_path: Path) -> bytes:
@@ -386,6 +529,20 @@ def _safe_rel_path(raw_path: str) -> PurePosixPath:
     if not path.parts:
         raise BundleImportError("Archive contains an empty path")
     return path
+
+
+def _validate_repo_safe_token(raw: str, *, field_label: str) -> str:
+    value = raw.strip()
+    if not value:
+        raise BundleImportError(
+            f"Invalid --{field_label}: value must be non-empty."
+        )
+    if not _REPO_SAFE_TOKEN_PATTERN.fullmatch(value):
+        raise BundleImportError(
+            f"Invalid --{field_label}: `{raw}`. "
+            "Expected lowercase letters, numbers, or hyphens only."
+        )
+    return value
 
 
 def _skill_root(path: PurePosixPath) -> PurePosixPath | None:
