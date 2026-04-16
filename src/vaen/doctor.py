@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Collection
 
+from .importer import (
+    derive_activated_paths,
+    resolve_import_target_overrides,
+)
 
 @dataclass(frozen=True, slots=True)
 class DoctorResult:
@@ -23,10 +27,22 @@ def run_doctor(
     target_repo: str | Path | None = None,
     *,
     start: str | Path = ".",
+    target: str | None = None,
+    target_instructions_file_name: str | None = None,
+    target_skills_directory: str | None = None,
 ) -> DoctorResult:
     """Run structural checks for an imported VAEN setup."""
 
     repo_root = resolve_doctor_target(target_repo=target_repo, start=start)
+    overrides = resolve_import_target_overrides(
+        target=target,
+        target_instructions_file_name=target_instructions_file_name,
+        target_skills_directory=target_skills_directory,
+    )
+    activated_paths = derive_activated_paths(
+        target_repo=repo_root,
+        overrides=overrides,
+    )
     checks_run: list[str] = []
     warnings: list[str] = []
     errors: list[str] = []
@@ -55,7 +71,7 @@ def run_doctor(
     checks_run.append("repo-dotenv-discovery")
     env_path = discover_repo_env_file(repo_root)
     if env_path is None:
-        warnings.append(f"Missing repo .env file: {repo_root / '.env'}")
+        warnings.append(f"Missing repo .env file (if needed): {repo_root / '.env'}")
         env_var_names: set[str] = set()
     else:
         env_var_names = parse_repo_env_file(env_path)
@@ -67,23 +83,15 @@ def run_doctor(
             f"No canonical imported bundle directory found under {repo_root / '.agent'}"
         )
 
-    checks_run.append("root-agents-md-exists")
-    if not (repo_root / "AGENTS.md").is_file():
-        errors.append(f"Missing root AGENTS.md: {repo_root / 'AGENTS.md'}")
+    for path in activated_paths.root_instruction_paths:
+        checks_run.append(f"root-instruction-exists:{path.name}")
+        if not path.is_file():
+            errors.append(f"Missing root instruction file: {path}")
 
-    checks_run.append("root-claude-md-exists")
-    if not (repo_root / "CLAUDE.md").is_file():
-        errors.append(f"Missing root CLAUDE.md: {repo_root / 'CLAUDE.md'}")
-
-    checks_run.append("mirrored-agent-skills-dir-exists")
-    if not (repo_root / ".agent" / "skills").is_dir():
-        errors.append(f"Missing mirrored skills directory: {repo_root / '.agent' / 'skills'}")
-
-    checks_run.append("mirrored-claude-skills-dir-exists")
-    if not (repo_root / ".claude" / "skills").is_dir():
-        errors.append(
-            f"Missing mirrored skills directory: {repo_root / '.claude' / 'skills'}"
-        )
+    for path in activated_paths.skills_mirror_roots:
+        checks_run.append(f"mirrored-skills-dir-exists:{path}")
+        if not path.is_dir():
+            errors.append(f"Missing mirrored skills directory: {path}")
 
     for bundle_dir in bundles:
         _check_bundle_structure(bundle_dir, checks_run, errors)
