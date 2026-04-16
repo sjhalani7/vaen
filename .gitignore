@@ -5,3 +5,5 @@ __pycache__/
 *.agent
 *.egg-info/
 *.md
+
+examples/synthetic-fixture
