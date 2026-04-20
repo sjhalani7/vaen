@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .bundle import BundleModel, build_bundle_model
+from .errors import BuildError
 from .manifest import load_manifest
 
 OCI_LAYOUT_PATH = "oci-layout"
@@ -94,11 +95,17 @@ def _derive_bundle_name(source_root: Path | None) -> str:
 
 
 def _build_layer_archive(bundle: BundleModel) -> bytes:
+    canonical_mcp_payloads = _build_canonical_mcp_payloads(bundle)
     metadata_payload = {
         "manifest": dict(bundle.metadata),
-        "storedPaths": [str(entry.bundle_path) for entry in bundle.entries],
-        "entries": [
-            {"kind": entry.kind, "path": str(entry.bundle_path)} for entry in bundle.entries
+        "storedPaths": [
+            str(entry.bundle_path) for entry in bundle.entries
+        ]
+        + [str(mcp_file.bundle_path) for mcp_file in bundle.mcp_files],
+        "entries": [{"kind": entry.kind, "path": str(entry.bundle_path)} for entry in bundle.entries]
+        + [
+            {"kind": "mcp.server", "path": str(mcp_file.bundle_path)}
+            for mcp_file in bundle.mcp_files
         ],
     }
 
@@ -107,7 +114,41 @@ def _build_layer_archive(bundle: BundleModel) -> bytes:
         _add_bytes_to_tar(layer_tar, METADATA_PATH, _encode_json(metadata_payload))
         for entry in sorted(bundle.entries, key=lambda item: str(item.bundle_path)):
             _add_entry(layer_tar, entry.source_path, entry.bundle_path)
+        for mcp_file in sorted(bundle.mcp_files, key=lambda item: str(item.bundle_path)):
+            payload = canonical_mcp_payloads[mcp_file.bundle_path]
+            _add_bytes_to_tar(layer_tar, str(mcp_file.bundle_path), payload)
     return buffer.getvalue()
+
+
+def _build_canonical_mcp_payloads(bundle: BundleModel) -> dict[PurePosixPath, bytes]:
+    mcp_metadata = bundle.metadata.get("mcp")
+    if not isinstance(mcp_metadata, dict):
+        if bundle.mcp_files:
+            raise BuildError("Bundle contains canonical MCP files but no MCP metadata")
+        return {}
+
+    servers = mcp_metadata.get("servers")
+    if not isinstance(servers, list):
+        raise BuildError("Bundle MCP metadata is missing the servers list")
+
+    payloads: dict[PurePosixPath, bytes] = {}
+    for server in servers:
+        if not isinstance(server, dict):
+            raise BuildError("Bundle MCP metadata contains a non-mapping server entry")
+
+        bundle_path = server.get("bundlePath")
+        if not isinstance(bundle_path, str):
+            raise BuildError("Bundle MCP metadata server is missing bundlePath")
+
+        payloads[PurePosixPath(bundle_path)] = _encode_json(server)
+
+    for mcp_file in bundle.mcp_files:
+        if mcp_file.bundle_path not in payloads:
+            raise BuildError(
+                f"Bundle MCP metadata is missing canonical payload for {mcp_file.server_name!r}"
+            )
+
+    return payloads
 
 
 def _add_entry(tar: tarfile.TarFile, source_path: Path, bundle_path: PurePosixPath) -> None:
