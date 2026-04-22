@@ -102,11 +102,7 @@ def _build_layer_archive(bundle: BundleModel) -> bytes:
             str(entry.bundle_path) for entry in bundle.entries
         ]
         + [str(mcp_file.bundle_path) for mcp_file in bundle.mcp_files],
-        "entries": [{"kind": entry.kind, "path": str(entry.bundle_path)} for entry in bundle.entries]
-        + [
-            {"kind": "mcp.server", "path": str(mcp_file.bundle_path)}
-            for mcp_file in bundle.mcp_files
-        ],
+        "entries": [{"kind": entry.kind, "path": str(entry.bundle_path)} for entry in bundle.entries],
     }
 
     buffer = io.BytesIO()
