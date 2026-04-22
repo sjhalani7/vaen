@@ -9,7 +9,7 @@ import shutil
 import tarfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 from .errors import BundleImportError
 
@@ -17,6 +17,9 @@ _METADATA_PATH = "vaen/metadata.json"
 _ROOT_SHIMS = ("AGENTS.md", "CLAUDE.md")
 _SKILL_MIRROR_ROOTS = ((".agent", "skills"), (".claude", "skills"))
 _REPO_SAFE_TOKEN_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
+_MCP_CODEX_CONFIG_PATH = (".codex", "config.toml")
+_MCP_CLAUDE_CONFIG_PATH = (".mcp.json",)
+_MCP_COPILOT_CONFIG_PATH = (".github", "mcp.json")
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,6 +31,16 @@ class SkillPlan:
 
 
 @dataclass(frozen=True, slots=True)
+class MCPServerPlan:
+    """One discovered canonical MCP server definition from the bundle layer."""
+
+    name: str
+    transport: str
+    canonical_file: PurePosixPath
+    definition: Mapping[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
 class ImportPlan:
     """Structured import plan extracted from a `.agent` archive."""
 
@@ -36,6 +49,7 @@ class ImportPlan:
     main_instruction: PurePosixPath
     included_instructions: tuple[PurePosixPath, ...]
     skills: tuple[SkillPlan, ...]
+    mcp_servers: tuple[MCPServerPlan, ...]
     layer_files: tuple[PurePosixPath, ...]
 
 
@@ -54,6 +68,59 @@ class ActivatedImportPaths:
 
     root_instruction_paths: tuple[Path, ...]
     skills_mirror_roots: tuple[Path, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class MCPClientTargetPaths:
+    """Derived client-specific MCP target paths for later activation steps."""
+
+    client: str
+    config_path: Path
+
+
+def render_mcp_config(plan: ImportPlan, client: str) -> str:
+    """Render project-scoped MCP config for the selected client."""
+
+    if client == "codex":
+        return _render_codex_mcp_config(plan)
+    if client == "claude":
+        return _render_json_mcp_config(plan, _render_claude_mcp_server)
+    if client == "copilot":
+        return _render_json_mcp_config(plan, _render_copilot_mcp_server)
+    raise BundleImportError(
+        f"Unsupported MCP client `{client}`. Expected one of: codex, claude, copilot."
+    )
+
+
+def _render_codex_mcp_config(plan: ImportPlan) -> str:
+    """Render project-scoped Codex MCP TOML from neutral MCP server definitions."""
+
+    if not plan.mcp_servers:
+        return ""
+
+    lines: list[str] = []
+    for index, server in enumerate(plan.mcp_servers):
+        if index > 0:
+            lines.append("")
+        lines.extend(_render_codex_mcp_server(server))
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _render_json_mcp_config(
+    plan: ImportPlan,
+    render_server: Any,
+) -> str:
+    """Render clients whose project MCP config uses the mcpServers JSON shape."""
+
+    if not plan.mcp_servers:
+        return ""
+
+    mcp_servers: dict[str, dict[str, Any]] = {}
+    for server in plan.mcp_servers:
+        mcp_servers[server.name] = render_server(server)
+
+    return json.dumps({"mcpServers": mcp_servers}, indent=2) + "\n"
 
 
 def validate_import_target_name(raw: str) -> str:
@@ -197,6 +264,73 @@ def derive_activated_paths(
     )
 
 
+def derive_mcp_client_target_paths(
+    target_repo: str | Path,
+    client: str,
+) -> MCPClientTargetPaths:
+    """Derive client-specific MCP target paths under the repo root.
+
+    Codex, Claude, and Copilot all resolve to project-scoped config paths.
+    """
+
+    repo_root = resolve_import_target(target_repo)
+    if client == "codex":
+        return MCPClientTargetPaths(
+            client=client,
+            config_path=repo_root.joinpath(*_MCP_CODEX_CONFIG_PATH),
+        )
+
+    if client == "claude":
+        return MCPClientTargetPaths(
+            client=client,
+            config_path=repo_root.joinpath(*_MCP_CLAUDE_CONFIG_PATH),
+        )
+
+    if client == "copilot":
+        return MCPClientTargetPaths(
+            client=client,
+            config_path=repo_root.joinpath(*_MCP_COPILOT_CONFIG_PATH),
+        )
+
+    raise BundleImportError(
+        f"Unsupported MCP client `{client}`. Expected one of: codex, claude, copilot."
+    )
+
+
+def ensure_mcp_client_target_available(
+    target_repo: str | Path,
+    archive_path: str | Path,
+    client: str,
+) -> MCPClientTargetPaths:
+    """Raise if the activated MCP client config path already exists."""
+
+    target_paths = derive_mcp_client_target_paths(target_repo, client)
+    if target_paths.config_path.exists():
+        canonical_mcp_root = canonical_bundle_destination(
+            target_repo,
+            archive_path,
+        ) / "mcp"
+        raise BundleImportError(
+            f"MCP client config already exists: {target_paths.config_path}. "
+            "Refusing to overwrite existing project MCP configuration. "
+            f"Copy the generated files from the canonical bundle instead: {canonical_mcp_root}"
+        )
+    return target_paths
+
+
+def write_selected_client_mcp_config(
+    plan: ImportPlan,
+    *,
+    target_paths: MCPClientTargetPaths,
+) -> Path:
+    """Render and write the selected client's activated MCP config file."""
+
+    payload = render_mcp_config(plan, target_paths.client)
+    target_paths.config_path.parent.mkdir(parents=True, exist_ok=True)
+    target_paths.config_path.write_text(payload, encoding="utf-8")
+    return target_paths.config_path
+
+
 def ensure_root_shims_available(
     target_repo: str | Path,
     overrides: ImportTargetOverrides | None = None,
@@ -228,6 +362,7 @@ def prepare_import_plan(archive_path: str | Path) -> ImportPlan:
     with tarfile.open(fileobj=io.BytesIO(layer_blob), mode="r:") as layer_tar:
         metadata = _read_metadata(layer_tar)
         layer_files = _list_layer_files(layer_tar)
+        mcp_servers = _build_mcp_server_plans(layer_tar, metadata, layer_files)
 
     main, includes, skill_roots = _discover_paths(metadata, layer_files)
     skills = _build_skill_plans(skill_roots, layer_files)
@@ -238,6 +373,7 @@ def prepare_import_plan(archive_path: str | Path) -> ImportPlan:
         main_instruction=main,
         included_instructions=includes,
         skills=skills,
+        mcp_servers=mcp_servers,
         layer_files=layer_files,
     )
 
@@ -522,6 +658,235 @@ def _build_skill_plans(
     return tuple(plans)
 
 
+def _build_mcp_server_plans(
+    layer_tar: tarfile.TarFile,
+    metadata: Mapping[str, Any],
+    layer_files: tuple[PurePosixPath, ...],
+) -> tuple[MCPServerPlan, ...]:
+    server_paths = _discover_mcp_server_paths(metadata, layer_files)
+    plans: list[MCPServerPlan] = []
+    seen_names: set[str] = set()
+
+    for canonical_file in server_paths:
+        definition = _parse_json(
+            _read_tar_member(layer_tar, canonical_file.as_posix()),
+            canonical_file.as_posix(),
+        )
+        if not isinstance(definition, Mapping):
+            raise BundleImportError(
+                f"Canonical MCP definition is malformed: {canonical_file}"
+            )
+
+        name = definition.get("name")
+        if not isinstance(name, str) or not name:
+            raise BundleImportError(
+                f"Canonical MCP definition is missing name: {canonical_file}"
+            )
+
+        transport = definition.get("transport")
+        if transport not in {"stdio", "http"}:
+            raise BundleImportError(
+                f"Canonical MCP definition has unsupported transport: {canonical_file}"
+            )
+
+        if name in seen_names:
+            raise BundleImportError(
+                f"Canonical MCP definition name is duplicated in archive: {name}"
+            )
+        seen_names.add(name)
+
+        plans.append(
+            MCPServerPlan(
+                name=name,
+                transport=transport,
+                canonical_file=canonical_file,
+                definition=definition,
+            )
+        )
+
+    return tuple(plans)
+
+
+def _discover_mcp_server_paths(
+    metadata: Mapping[str, Any],
+    layer_files: tuple[PurePosixPath, ...],
+) -> tuple[PurePosixPath, ...]:
+    paths: list[PurePosixPath] = []
+
+    manifest_raw = metadata.get("manifest")
+    if isinstance(manifest_raw, Mapping):
+        mcp_raw = manifest_raw.get("mcp")
+        if isinstance(mcp_raw, Mapping):
+            servers_raw = mcp_raw.get("servers")
+            if isinstance(servers_raw, list):
+                for server in servers_raw:
+                    if not isinstance(server, Mapping):
+                        continue
+                    raw_path = server.get("bundlePath")
+                    if not isinstance(raw_path, str):
+                        continue
+                    bundle_path = _safe_rel_path(raw_path)
+                    if _is_mcp_server_path(bundle_path):
+                        paths.append(bundle_path)
+
+    stored_paths_raw = metadata.get("storedPaths", [])
+    if isinstance(stored_paths_raw, list):
+        for raw_path in stored_paths_raw:
+            if not isinstance(raw_path, str):
+                continue
+            bundle_path = _safe_rel_path(raw_path)
+            if _is_mcp_server_path(bundle_path):
+                paths.append(bundle_path)
+
+    if not paths:
+        paths = [item for item in layer_files if _is_mcp_server_path(item)]
+
+    return tuple(_dedupe_paths(paths))
+
+
+def _render_codex_mcp_server(server: MCPServerPlan) -> list[str]:
+    definition = server.definition
+    lines = [f'[mcp_servers.{_render_toml_key(server.name)}]']
+
+    if server.transport == "stdio":
+        command = _require_string_field(
+            definition,
+            "command",
+            server.name,
+        )
+        lines.append(f"command = {_render_toml_string(command)}")
+        args = _optional_string_list_field(definition, "args")
+        if args:
+            lines.append(f"args = {_render_toml_string_list(args)}")
+        cwd = _optional_string_field(definition, "cwd")
+        if cwd is not None:
+            lines.append(f"cwd = {_render_toml_string(cwd)}")
+
+        env_vars = _optional_string_list_field(definition, "envVars")
+        if env_vars:
+            lines.append(f"env_vars = {_render_toml_string_list(_dedupe_strings(env_vars))}")
+        return lines
+
+    if server.transport == "http":
+        url = _require_string_field(definition, "url", server.name)
+        lines.append(f"url = {_render_toml_string(url)}")
+        bearer_token_env_var = _optional_string_field(definition, "bearerTokenEnvVar")
+        if bearer_token_env_var is not None:
+            lines.append(
+                f"bearer_token_env_var = {_render_toml_string(bearer_token_env_var)}"
+            )
+
+        header_env_vars = _optional_string_mapping_field(definition, "headerEnvVars")
+        if header_env_vars:
+            lines.append("")
+            lines.append(
+                f'[mcp_servers.{_render_toml_key(server.name)}.env_http_headers]'
+            )
+            for header_name, local_env_var_name in sorted(header_env_vars.items()):
+                lines.append(
+                    f"{_render_toml_key(header_name)} = "
+                    f"{_render_toml_string(local_env_var_name)}"
+                )
+        return lines
+
+    raise BundleImportError(
+        f"Unsupported MCP transport for Codex rendering: {server.transport}"
+    )
+
+
+def _render_claude_mcp_server(server: MCPServerPlan) -> dict[str, Any]:
+    definition = server.definition
+
+    if server.transport == "stdio":
+        command = _require_string_field(definition, "command", server.name)
+        rendered: dict[str, Any] = {
+            "command": command,
+            "args": list(_optional_string_list_field(definition, "args")),
+        }
+        cwd = _optional_string_field(definition, "cwd")
+        if cwd is not None:
+            rendered["cwd"] = cwd
+
+        env_vars = _optional_string_list_field(definition, "envVars")
+        if env_vars:
+            rendered["env"] = _render_identity_env_placeholder_mapping(env_vars)
+        return rendered
+
+    if server.transport == "http":
+        url = _require_string_field(definition, "url", server.name)
+        rendered = {
+            "type": "http",
+            "url": url,
+        }
+
+        headers: dict[str, str] = {}
+        bearer_token_env_var = _optional_string_field(definition, "bearerTokenEnvVar")
+        if bearer_token_env_var is not None:
+            headers["Authorization"] = (
+                f"Bearer {_render_env_placeholder(bearer_token_env_var)}"
+            )
+
+        header_env_vars = _optional_string_mapping_field(definition, "headerEnvVars")
+        if header_env_vars:
+            headers.update(_render_env_placeholder_mapping(header_env_vars))
+
+        if headers:
+            rendered["headers"] = headers
+        return rendered
+
+    raise BundleImportError(
+        f"Unsupported MCP transport for Claude rendering: {server.transport}"
+    )
+
+
+def _render_copilot_mcp_server(server: MCPServerPlan) -> dict[str, Any]:
+    definition = server.definition
+
+    if server.transport == "stdio":
+        command = _require_string_field(definition, "command", server.name)
+        rendered: dict[str, Any] = {
+            "type": "local",
+            "command": command,
+            "args": list(_optional_string_list_field(definition, "args")),
+            "tools": ["*"],
+        }
+        cwd = _optional_string_field(definition, "cwd")
+        if cwd is not None:
+            rendered["cwd"] = cwd
+
+        env_vars = _optional_string_list_field(definition, "envVars")
+        if env_vars:
+            rendered["env"] = _render_identity_env_placeholder_mapping(env_vars)
+        return rendered
+
+    if server.transport == "http":
+        url = _require_string_field(definition, "url", server.name)
+        rendered = {
+            "type": "http",
+            "url": url,
+            "tools": ["*"],
+        }
+
+        headers: dict[str, str] = {}
+        bearer_token_env_var = _optional_string_field(definition, "bearerTokenEnvVar")
+        if bearer_token_env_var is not None:
+            headers["Authorization"] = (
+                f"Bearer {_render_env_placeholder(bearer_token_env_var)}"
+            )
+
+        header_env_vars = _optional_string_mapping_field(definition, "headerEnvVars")
+        if header_env_vars:
+            headers.update(_render_env_placeholder_mapping(header_env_vars))
+
+        if headers:
+            rendered["headers"] = headers
+        return rendered
+
+    raise BundleImportError(
+        f"Unsupported MCP transport for Copilot rendering: {server.transport}"
+    )
+
+
 def _safe_rel_path(raw_path: str) -> PurePosixPath:
     path = PurePosixPath(raw_path)
     if path.is_absolute() or ".." in path.parts:
@@ -551,12 +916,18 @@ def _skill_root(path: PurePosixPath) -> PurePosixPath | None:
     return PurePosixPath("skills", path.parts[1])
 
 
+def _is_mcp_server_path(path: PurePosixPath) -> bool:
+    return _is_under(path, PurePosixPath("mcp", "servers"))
+
+
 def _is_canonical_stored_path(path: PurePosixPath) -> bool:
     if path.as_posix() == _METADATA_PATH:
         return True
     if _is_under(path, PurePosixPath("instructions")):
         return True
     if _is_under(path, PurePosixPath("skills")):
+        return True
+    if _is_under(path, PurePosixPath("mcp")):
         return True
     return False
 
@@ -602,3 +973,118 @@ def _parse_json(payload: bytes, label: str) -> Any:
         return json.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise BundleImportError(f"Archive JSON is malformed: {label}") from exc
+
+
+def _require_string_field(
+    definition: Mapping[str, Any],
+    field_name: str,
+    server_name: str,
+) -> str:
+    value = definition.get(field_name)
+    if isinstance(value, str) and value:
+        return value
+    raise BundleImportError(
+        f"Canonical MCP definition for {server_name!r} is missing {field_name}"
+    )
+
+
+def _optional_string_field(
+    definition: Mapping[str, Any],
+    field_name: str,
+) -> str | None:
+    value = definition.get(field_name)
+    if value is None:
+        return None
+    if isinstance(value, str) and value:
+        return value
+    raise BundleImportError(
+        f"Canonical MCP definition field {field_name!r} must be a non-empty string"
+    )
+
+
+def _optional_string_list_field(
+    definition: Mapping[str, Any],
+    field_name: str,
+) -> tuple[str, ...]:
+    value = definition.get(field_name)
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise BundleImportError(
+            f"Canonical MCP definition field {field_name!r} must be a list of strings"
+        )
+    items: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise BundleImportError(
+                f"Canonical MCP definition field {field_name!r} must be a list of strings"
+            )
+        items.append(item)
+    return tuple(items)
+
+
+def _optional_string_mapping_field(
+    definition: Mapping[str, Any],
+    field_name: str,
+) -> Mapping[str, str]:
+    value = definition.get(field_name)
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise BundleImportError(
+            f"Canonical MCP definition field {field_name!r} must be a string mapping"
+        )
+
+    rendered: dict[str, str] = {}
+    for raw_key, raw_value in value.items():
+        if not isinstance(raw_key, str) or not isinstance(raw_value, str):
+            raise BundleImportError(
+                f"Canonical MCP definition field {field_name!r} must be a string mapping"
+            )
+        rendered[raw_key] = raw_value
+    return rendered
+
+
+def _render_toml_key(value: str) -> str:
+    if re.fullmatch(r"[A-Za-z0-9_-]+", value):
+        return value
+    return json.dumps(value)
+
+
+def _render_toml_string(value: str) -> str:
+    return json.dumps(value)
+
+
+def _render_toml_string_list(values: tuple[str, ...]) -> str:
+    return "[" + ", ".join(_render_toml_string(value) for value in values) + "]"
+
+
+def _render_env_placeholder(env_var_name: str) -> str:
+    return f"${{{env_var_name}}}"
+
+
+def _render_env_placeholder_mapping(values: Mapping[str, str]) -> dict[str, str]:
+    rendered: dict[str, str] = {}
+    for key, env_var_name in sorted(values.items()):
+        rendered[key] = _render_env_placeholder(env_var_name)
+    return rendered
+
+
+def _render_identity_env_placeholder_mapping(
+    env_var_names: Iterable[str],
+) -> dict[str, str]:
+    rendered: dict[str, str] = {}
+    for env_var_name in _dedupe_strings(env_var_names):
+        rendered[env_var_name] = _render_env_placeholder(env_var_name)
+    return rendered
+
+
+def _dedupe_strings(values: Iterable[str]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
+    return tuple(deduped)
