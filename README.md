@@ -76,6 +76,8 @@ mcp:
     - name: docs
       transport: http
       url: https://example.com/mcp
+      http_headers:
+        X-Region: us-east-1
       bearer_token_env_var: DOCS_MCP_TOKEN
       header_env_vars:
         X-API-Key: DOCS_MCP_TOKEN
@@ -88,6 +90,7 @@ Manifest rules:
 - `artifacts` is a list and may be empty for instructions-only bundles.
 - `skills` is the supported artifact type.
 - `requiredVars` stores environment variable names only, never values.
+- `http_headers` stores non-secret static HTTP headers for MCP servers.
 - `mcp` is optional and lives at the top level of the manifest.
 - Source paths may point inside or outside the repo.
 
@@ -262,14 +265,14 @@ Credential handling is metadata-only:
 
 The test fixture is a compact reference manifest:
 
-- [/Users/shivjhalani/Desktop/AIM/examples/synthetic-fixture/agent.yaml](/Users/shivjhalani/Desktop/AIM/examples/synthetic-fixture/agent.yaml)
+- [examples/synthetic-fixture/agent.yaml](examples/synthetic-fixture/agent.yaml)
 
 The project-specific example is here:
 
-- [/Users/shivjhalani/Desktop/AIM/examples/shiv-codex-setup/agent.yaml](/Users/shivjhalani/Desktop/AIM/examples/shiv-codex-setup/agent.yaml)
+- [examples/shiv-codex-setup/agent.yaml](examples/shiv-codex-setup/agent.yaml)
 
 ## License
 
 VAEN is released under the MIT License.
 
-The software is provided as-is, without warranty of any kind. The authors and copyright holders are not liable for claims, damages, or other liability arising from use of the software. See [LICENSE](/Users/shivjhalani/Desktop/AIM/LICENSE) for the full license text.
+The software is provided as-is, without warranty of any kind. The authors and copyright holders are not liable for claims, damages, or other liability arising from use of the software. See [LICENSE](LICENSE) for the full license text.
