@@ -180,6 +180,57 @@ def resolve_import_target_overrides(
     )
 
 
+def resolve_import_target_overrides_with_client_defaults(
+    *,
+    client: str | None = None,
+    target: str | None = None,
+    target_instructions_file_name: str | None = None,
+    target_skills_directory: str | None = None,
+) -> ImportTargetOverrides:
+    """Resolve activated-output overrides, optionally defaulting based on `--client`.
+
+    Client-derived defaults apply only when *none* of the explicit target override
+    flags were provided. If any override flag is provided, preserve the existing
+    behavior from `resolve_import_target_overrides(...)` exactly.
+    """
+
+    has_explicit_overrides = any(
+        value is not None
+        for value in (target, target_instructions_file_name, target_skills_directory)
+    )
+    if has_explicit_overrides:
+        return resolve_import_target_overrides(
+            target=target,
+            target_instructions_file_name=target_instructions_file_name,
+            target_skills_directory=target_skills_directory,
+        )
+
+    if client is None:
+        return resolve_import_target_overrides()
+
+    if client == "claude":
+        return ImportTargetOverrides(
+            instruction_filename="CLAUDE.md",
+            skills_directory_name="claude",
+        )
+
+    if client == "codex":
+        return ImportTargetOverrides(
+            instruction_filename="AGENTS.md",
+            skills_directory_name="codex",
+        )
+
+    if client == "copilot":
+        return ImportTargetOverrides(
+            instruction_filename="AGENTS.md",
+            skills_directory_name="copilot",
+        )
+
+    raise BundleImportError(
+        f"Unsupported MCP client `{client}`. Expected one of: codex, claude, copilot."
+    )
+
+
 def resolve_import_target(
     target_path: str | Path | None = None,
     *,

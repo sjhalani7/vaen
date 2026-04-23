@@ -14,7 +14,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python < 3.11 compatibility.
 from .importer import (
     derive_activated_paths,
     derive_mcp_client_target_paths,
-    resolve_import_target_overrides,
+    resolve_import_target_overrides_with_client_defaults,
 )
 
 @dataclass(frozen=True, slots=True)
@@ -40,7 +40,8 @@ def run_doctor(
     """Run structural checks for an imported VAEN setup."""
 
     repo_root = resolve_doctor_target(target_repo=target_repo, start=start)
-    overrides = resolve_import_target_overrides(
+    overrides = resolve_import_target_overrides_with_client_defaults(
+        client=client,
         target=target,
         target_instructions_file_name=target_instructions_file_name,
         target_skills_directory=target_skills_directory,

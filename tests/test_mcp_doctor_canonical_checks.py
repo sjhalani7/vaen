@@ -99,7 +99,7 @@ class MCPDoctorCanonicalChecksTests(unittest.TestCase):
             )
             _write_declared_canonical_mcp_file(bundle_dir)
             config_path = target_repo / ".codex" / "config.toml"
-            config_path.parent.mkdir()
+            config_path.parent.mkdir(exist_ok=True)
             config_path.write_text("[mcp_servers.postgres\n", encoding="utf-8")
 
             result = run_doctor(target_repo=target_repo, client="codex")
@@ -139,6 +139,7 @@ def _write_minimal_imported_bundle(*, target_repo: Path, bundle_name: str) -> Pa
     (bundle_dir / "instructions").mkdir()
     (bundle_dir / "skills").mkdir()
     (target_repo / ".agent" / "skills").mkdir(parents=True)
+    (target_repo / ".codex" / "skills").mkdir(parents=True)
     (target_repo / ".claude" / "skills").mkdir(parents=True)
     (target_repo / "AGENTS.md").write_text("# Agent\n", encoding="utf-8")
     (target_repo / "CLAUDE.md").write_text("# Claude\n", encoding="utf-8")

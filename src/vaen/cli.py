@@ -18,7 +18,7 @@ from .importer import (
     mirror_imported_skills,
     prepare_import_plan,
     resolve_import_target,
-    resolve_import_target_overrides,
+    resolve_import_target_overrides_with_client_defaults,
     write_selected_client_mcp_config,
 )
 from .inspect import format_inspect_output, inspect_agent_archive
@@ -55,7 +55,8 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "import":
             repo_root = resolve_import_target(args.into, start=Path.cwd())
-            overrides = resolve_import_target_overrides(
+            overrides = resolve_import_target_overrides_with_client_defaults(
+                client=args.client,
                 target=args.target,
                 target_instructions_file_name=args.target_instructions_file_name,
                 target_skills_directory=args.target_skills_directory,
@@ -217,7 +218,10 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=("codex", "claude", "copilot"),
         help=(
             "Optional project-scoped MCP client target "
-            "(codex, claude, or copilot). Required when the bundle contains MCP servers."
+            "(codex, claude, or copilot). Required when the bundle contains MCP servers. "
+            "If no activated-output override flags are provided "
+            "(`--target`, `--target-instructions-file-name`, `--target-skills-directory`), "
+            "`--client` also selects the default activated root instruction + skills mirror paths."
         ),
     )
 
@@ -258,7 +262,9 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=("codex", "claude", "copilot"),
         help=(
             "Optional project-scoped MCP client target for MCP config checks "
-            "(codex, claude, or copilot)."
+            "(codex, claude, or copilot). If no activated-output override flags are provided "
+            "(`--target`, `--target-instructions-file-name`, `--target-skills-directory`), "
+            "`--client` also selects the default activated root instruction + skills mirror checks."
         ),
     )
 
