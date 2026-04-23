@@ -172,6 +172,8 @@ def _build_mcp_server_metadata(
         return metadata
 
     metadata["url"] = server.url
+    if server.http_headers:
+        metadata["httpHeaders"] = dict(server.http_headers)
     if server.bearer_token_env_var is not None:
         metadata["bearerTokenEnvVar"] = server.bearer_token_env_var
     if server.header_env_vars:

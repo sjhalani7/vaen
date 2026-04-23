@@ -59,6 +59,7 @@ class MCPHttpServerSpec:
     name: str
     transport: Literal["http"] = "http"
     url: str = ""
+    http_headers: Mapping[str, str] = field(default_factory=dict)
     bearer_token_env_var: str | None = None
     header_env_vars: Mapping[str, str] = field(default_factory=dict)
 
@@ -320,6 +321,10 @@ def _parse_mcp_server(
 
     if transport == "http":
         url = _require_string(raw, "url", context=context)
+        http_headers = _parse_string_mapping(
+            raw.get("http_headers", {}),
+            context=f"{context}.http_headers",
+        )
         bearer_token_env_var = _optional_string(
             raw.get("bearer_token_env_var"),
             context=f"{context}.bearer_token_env_var",
@@ -328,9 +333,16 @@ def _parse_mcp_server(
             raw.get("header_env_vars", {}),
             context=f"{context}.header_env_vars",
         )
+        _reject_http_header_conflicts(
+            http_headers=http_headers,
+            header_env_vars=header_env_vars,
+            has_bearer_token=bearer_token_env_var is not None,
+            context=context,
+        )
         return MCPHttpServerSpec(
             name=name,
             url=url,
+            http_headers=http_headers,
             bearer_token_env_var=bearer_token_env_var,
             header_env_vars=header_env_vars,
         )
@@ -385,6 +397,43 @@ def _parse_string_mapping(raw: Any, *, context: str) -> Mapping[str, str]:
         values[key] = value
 
     return values
+
+
+def _reject_http_header_conflicts(
+    *,
+    http_headers: Mapping[str, str],
+    header_env_vars: Mapping[str, str],
+    has_bearer_token: bool,
+    context: str,
+) -> None:
+    """Reject ambiguous HTTP header definitions before client rendering."""
+
+    seen: dict[str, str] = {}
+    for header_name in http_headers:
+        normalized = header_name.lower()
+        previous = seen.get(normalized)
+        if previous is not None:
+            raise ManifestValidationError(
+                f"{context}.http_headers.{header_name} conflicts with {previous}"
+            )
+        seen[normalized] = f"{context}.http_headers.{header_name}"
+
+    if has_bearer_token:
+        previous = seen.get("authorization")
+        if previous is not None:
+            raise ManifestValidationError(
+                f"{context}.bearer_token_env_var conflicts with {previous}"
+            )
+        seen["authorization"] = f"{context}.bearer_token_env_var"
+
+    for header_name in header_env_vars:
+        normalized = header_name.lower()
+        previous = seen.get(normalized)
+        if previous is not None:
+            raise ManifestValidationError(
+                f"{context}.header_env_vars.{header_name} conflicts with {previous}"
+            )
+        seen[normalized] = f"{context}.header_env_vars.{header_name}"
 
 
 def _optional_string(raw: Any, *, context: str) -> str | None:

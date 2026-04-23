@@ -1,0 +1,27 @@
+version: "0.1"
+publisher: "VAEN Synthetic Fixture"
+
+instructions:
+  main: "./instructions/AGENTS.md"
+  includes:
+    - "./instructions/style.md"
+
+artifacts:
+  - type: skills
+    path: "./skills/code-review"
+  - type: skills
+    path: "./skills/refactor"
+
+mcp:
+  servers:
+    - name: workspace-files
+      transport: stdio
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
+    - name: docs-http
+      transport: http
+      url: https://example.com/mcp
+      bearer_token_env_var: SYNTHETIC_MCP_TOKEN
+
+requiredVars:
+  - OPENAI_API_KEY

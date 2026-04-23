@@ -776,17 +776,15 @@ def _render_codex_mcp_server(server: MCPServerPlan) -> list[str]:
                 f"bearer_token_env_var = {_render_toml_string(bearer_token_env_var)}"
             )
 
+        http_headers = _optional_string_mapping_field(definition, "httpHeaders")
+        if http_headers:
+            lines.append(f"http_headers = {_render_toml_string_mapping(http_headers)}")
+
         header_env_vars = _optional_string_mapping_field(definition, "headerEnvVars")
         if header_env_vars:
-            lines.append("")
             lines.append(
-                f'[mcp_servers.{_render_toml_key(server.name)}.env_http_headers]'
+                f"env_http_headers = {_render_toml_string_mapping(header_env_vars)}"
             )
-            for header_name, local_env_var_name in sorted(header_env_vars.items()):
-                lines.append(
-                    f"{_render_toml_key(header_name)} = "
-                    f"{_render_toml_string(local_env_var_name)}"
-                )
         return lines
 
     raise BundleImportError(
@@ -819,17 +817,7 @@ def _render_claude_mcp_server(server: MCPServerPlan) -> dict[str, Any]:
             "url": url,
         }
 
-        headers: dict[str, str] = {}
-        bearer_token_env_var = _optional_string_field(definition, "bearerTokenEnvVar")
-        if bearer_token_env_var is not None:
-            headers["Authorization"] = (
-                f"Bearer {_render_env_placeholder(bearer_token_env_var)}"
-            )
-
-        header_env_vars = _optional_string_mapping_field(definition, "headerEnvVars")
-        if header_env_vars:
-            headers.update(_render_env_placeholder_mapping(header_env_vars))
-
+        headers = _render_http_headers(definition)
         if headers:
             rendered["headers"] = headers
         return rendered
@@ -867,17 +855,7 @@ def _render_copilot_mcp_server(server: MCPServerPlan) -> dict[str, Any]:
             "tools": ["*"],
         }
 
-        headers: dict[str, str] = {}
-        bearer_token_env_var = _optional_string_field(definition, "bearerTokenEnvVar")
-        if bearer_token_env_var is not None:
-            headers["Authorization"] = (
-                f"Bearer {_render_env_placeholder(bearer_token_env_var)}"
-            )
-
-        header_env_vars = _optional_string_mapping_field(definition, "headerEnvVars")
-        if header_env_vars:
-            headers.update(_render_env_placeholder_mapping(header_env_vars))
-
+        headers = _render_http_headers(definition)
         if headers:
             rendered["headers"] = headers
         return rendered
@@ -1059,6 +1037,14 @@ def _render_toml_string_list(values: tuple[str, ...]) -> str:
     return "[" + ", ".join(_render_toml_string(value) for value in values) + "]"
 
 
+def _render_toml_string_mapping(values: Mapping[str, str]) -> str:
+    rendered_items = [
+        f"{_render_toml_string(key)} = {_render_toml_string(value)}"
+        for key, value in sorted(values.items())
+    ]
+    return "{ " + ", ".join(rendered_items) + " }"
+
+
 def _render_env_placeholder(env_var_name: str) -> str:
     return f"${{{env_var_name}}}"
 
@@ -1068,6 +1054,38 @@ def _render_env_placeholder_mapping(values: Mapping[str, str]) -> dict[str, str]
     for key, env_var_name in sorted(values.items()):
         rendered[key] = _render_env_placeholder(env_var_name)
     return rendered
+
+
+def _render_http_headers(definition: Mapping[str, Any]) -> dict[str, str]:
+    """Render static and env-backed HTTP headers for JSON MCP clients."""
+
+    headers = dict(_optional_string_mapping_field(definition, "httpHeaders"))
+    bearer_token_env_var = _optional_string_field(definition, "bearerTokenEnvVar")
+    if bearer_token_env_var is not None:
+        _add_rendered_http_header(
+            headers,
+            "Authorization",
+            f"Bearer {_render_env_placeholder(bearer_token_env_var)}",
+        )
+
+    header_env_vars = _optional_string_mapping_field(definition, "headerEnvVars")
+    for header_name, header_value in _render_env_placeholder_mapping(header_env_vars).items():
+        _add_rendered_http_header(headers, header_name, header_value)
+
+    return headers
+
+
+def _add_rendered_http_header(
+    headers: dict[str, str],
+    header_name: str,
+    header_value: str,
+) -> None:
+    for existing_name in headers:
+        if existing_name.lower() == header_name.lower():
+            raise BundleImportError(
+                f"Canonical MCP definition has duplicate HTTP header {header_name!r}"
+            )
+    headers[header_name] = header_value
 
 
 def _render_identity_env_placeholder_mapping(

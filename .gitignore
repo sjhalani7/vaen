@@ -10,4 +10,3 @@ __pycache__/
 !/README.md
 build/
 dist/
-examples/synthetic-fixture
