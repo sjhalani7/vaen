@@ -6,7 +6,12 @@ build-backend = "setuptools.build_meta"
 name = "vaen-agent"
 version = "0.1.0"
 description = "Portable OCI-backed agent bundle builder."
+readme = "README.md"
+license = {file = "LICENSE"}
 requires-python = ">=3.11"
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+]
 dependencies = [
     "oras",
     "PyYAML",

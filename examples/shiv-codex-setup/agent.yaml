@@ -1,4 +1,3 @@
-name:"shiv-agent-1"
 version: "0.1"
 publisher: "Shiv Jhalani"
 
@@ -17,6 +16,11 @@ artifacts:
   - type: skills
     path: "./skills/tool-search"
 
-materialization:
-  target: ".agent/<name>"
+mcp:
+  servers:
+    - name: context7
+      transport: stdio
+      command: npx
+      args: ["-y", "@upstash/context7-mcp"]
 
+requiredVars: []

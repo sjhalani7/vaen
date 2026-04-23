@@ -1,9 +1,13 @@
 __pycache__/
 .pytest_cache/
 .venv/
+.DS_Store
 *.pyc
 *.agent
 *.egg-info/
+.eggs/
 *.md
+!/README.md
 build/
+dist/
 examples/synthetic-fixture
