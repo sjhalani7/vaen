@@ -45,6 +45,41 @@ class CleanupCommandTests(unittest.TestCase):
             self.assertFalse(canonical_destination.exists())
             self.assertIn("Cleanup complete.", stdout_buffer.getvalue())
 
+    def test_cleanup_leaves_mcp_activation_files_untouched(self) -> None:
+        fixture_manifest = PROJECT_ROOT / "examples" / "synthetic-fixture" / "agent.yaml"
+
+        with tempfile.TemporaryDirectory() as td:
+            tmp_root = Path(td)
+            archive_path = tmp_root / "synthetic.agent"
+            target_repo = tmp_root / "target-repo"
+            target_repo.mkdir()
+
+            build_agent(manifest_path=fixture_manifest, output_path=archive_path)
+            canonical_destination = extract_canonical_bundle(
+                archive_path=archive_path,
+                target_repo=target_repo,
+            )
+
+            activation_files = {
+                target_repo / ".codex" / "config.toml": '[mcp_servers.keep]\n',
+                target_repo / ".mcp.json": '{"mcpServers": {"keep": {}}}\n',
+                target_repo / ".github" / "mcp.json": '{"mcpServers": {"keep": {}}}\n',
+            }
+            for path, content in activation_files.items():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+
+            stdout_buffer = io.StringIO()
+            with redirect_stdout(stdout_buffer):
+                code = cli_main(
+                    ["cleanup", str(archive_path), "--into", str(target_repo)]
+                )
+
+            self.assertEqual(code, 0)
+            self.assertFalse(canonical_destination.exists())
+            for path, content in activation_files.items():
+                self.assertEqual(path.read_text(encoding="utf-8"), content)
+
     def test_cleanup_refuses_when_canonical_bundle_missing(self) -> None:
         fixture_manifest = PROJECT_ROOT / "examples" / "synthetic-fixture" / "agent.yaml"
 

@@ -65,10 +65,6 @@ def main(argv: list[str] | None = None) -> int:
                 raise BundleImportError(
                     "Import requires --client when the bundle contains MCP servers."
                 )
-            canonical_destination = extract_canonical_bundle(
-                archive_path=args.archive,
-                target_repo=repo_root,
-            )
             mcp_target_paths = None
             if plan.mcp_servers and args.client is not None:
                 mcp_target_paths = ensure_mcp_client_target_available(
@@ -76,6 +72,10 @@ def main(argv: list[str] | None = None) -> int:
                     archive_path=args.archive,
                     client=args.client,
                 )
+            canonical_destination = extract_canonical_bundle(
+                archive_path=args.archive,
+                target_repo=repo_root,
+            )
             create_root_instruction_shims(
                 canonical_destination=canonical_destination,
                 plan=plan,
@@ -107,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
                 target=args.target,
                 target_instructions_file_name=args.target_instructions_file_name,
                 target_skills_directory=args.target_skills_directory,
+                client=args.client,
             )
             status = "PASS" if result.passed else "FAIL"
             print(f"Doctor {status}: {result.target_repo}")
@@ -142,8 +143,7 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="vaen",
         description=(
             "VAEN v1 CLI for OCI-backed `.agent` bundles: validate, build, inspect, "
-            "import, doctor, and cleanup. MCP tool configuration support is planned for "
-            "a later phase."
+            "import, doctor, and cleanup."
         ),
     )
     subparsers = parser.add_subparsers(dest="command")
@@ -225,7 +225,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "doctor",
         help=(
             "Run setup validation checks for an imported repository "
-            "(including requiredVars from .env and target-derived activated paths)."
+            "(including requiredVars metadata and target-derived activated paths)."
         ),
     )
     doctor_parser.add_argument(
@@ -251,6 +251,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             "Optional skills directory name override for activated checks "
             "(for example: copilot -> .copilot/skills)."
+        ),
+    )
+    doctor_parser.add_argument(
+        "--client",
+        choices=("codex", "claude", "copilot"),
+        help=(
+            "Optional project-scoped MCP client target for MCP config checks "
+            "(codex, claude, or copilot)."
         ),
     )
 

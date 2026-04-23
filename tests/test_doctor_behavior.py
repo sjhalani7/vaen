@@ -1,7 +1,8 @@
-"""Tests doctor pass/warn/fail behavior for repo-local `.env` handling."""
+"""Tests doctor pass/warn/fail behavior."""
 
 from __future__ import annotations
 
+import shutil
 import sys
 import tempfile
 import unittest
@@ -51,31 +52,44 @@ class DoctorBehaviorTests(unittest.TestCase):
         )
         return target_repo
 
-    def test_doctor_passes_when_env_contains_required_var(self) -> None:
-        repo = self._prepare_imported_repo()
-        (repo / ".env").write_text("OPENAI_API_KEY=test-key\n", encoding="utf-8")
-
-        result = run_doctor(target_repo=repo)
-        self.assertTrue(result.passed)
-        self.assertEqual(result.errors, ())
-
-    def test_doctor_warns_but_passes_when_env_missing(self) -> None:
+    def test_doctor_reports_required_vars_without_requiring_env_file(self) -> None:
         repo = self._prepare_imported_repo()
 
         result = run_doctor(target_repo=repo)
         self.assertTrue(result.passed)
-        self.assertTrue(any("Missing repo .env file" in msg for msg in result.warnings))
+        self.assertTrue(
+            any(
+                "Required env vars declared by bundle 'synthetic'" in msg
+                and "OPENAI_API_KEY" in msg
+                and "SYNTHETIC_MCP_TOKEN" in msg
+                for msg in result.warnings
+            )
+        )
+        self.assertFalse(any("Missing repo .env file" in msg for msg in result.warnings))
         self.assertEqual(result.errors, ())
 
-    def test_doctor_fails_when_env_missing_required_var(self) -> None:
+    def test_doctor_does_not_fail_based_on_env_contents(self) -> None:
         repo = self._prepare_imported_repo()
         (repo / ".env").write_text("OTHER_VAR=1\n", encoding="utf-8")
 
         result = run_doctor(target_repo=repo)
-        self.assertFalse(result.passed)
+        self.assertTrue(result.passed)
+        self.assertEqual(result.errors, ())
+
+    def test_doctor_warns_but_passes_when_canonical_skills_missing(self) -> None:
+        repo = self._prepare_imported_repo()
+        shutil.rmtree(repo / ".agent" / "synthetic" / "skills")
+
+        result = run_doctor(target_repo=repo)
+        self.assertTrue(result.passed)
         self.assertTrue(
-            any("Missing required vars" in msg and "OPENAI_API_KEY" in msg for msg in result.errors)
+            any(
+                "Missing canonical skills directory" in msg
+                and "may simply mean the user did not package skills" in msg
+                for msg in result.warnings
+            )
         )
+        self.assertEqual(result.errors, ())
 
 
 if __name__ == "__main__":

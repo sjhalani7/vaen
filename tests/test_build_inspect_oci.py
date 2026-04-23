@@ -54,11 +54,41 @@ class BuildInspectOciTests(unittest.TestCase):
                     layer_names = {member.name for member in layer.getmembers()}
                     self.assertIn("vaen/metadata.json", layer_names)
                     self.assertIn("instructions/main/AGENTS.md", layer_names)
+                    self.assertIn("mcp/servers/workspace-files.json", layer_names)
+                    self.assertIn("mcp/servers/docs-http.json", layer_names)
                     self.assertTrue(
                         any(name.startswith("skills/code-review/") for name in layer_names)
                     )
                     self.assertTrue(
                         any(name.startswith("skills/refactor/") for name in layer_names)
+                    )
+                    stdio_server = json.loads(
+                        _read_member(layer, "mcp/servers/workspace-files.json").decode("utf-8")
+                    )
+                    http_server = json.loads(
+                        _read_member(layer, "mcp/servers/docs-http.json").decode("utf-8")
+                    )
+                    self.assertEqual(
+                        stdio_server,
+                        {
+                            "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+                            "bundlePath": "mcp/servers/workspace-files.json",
+                            "command": "npx",
+                            "name": "workspace-files",
+                            "requiredVarNames": [],
+                            "transport": "stdio",
+                        },
+                    )
+                    self.assertEqual(
+                        http_server,
+                        {
+                            "bearerTokenEnvVar": "SYNTHETIC_MCP_TOKEN",
+                            "bundlePath": "mcp/servers/docs-http.json",
+                            "name": "docs-http",
+                            "requiredVarNames": ["SYNTHETIC_MCP_TOKEN"],
+                            "transport": "http",
+                            "url": "https://example.com/mcp",
+                        },
                     )
 
     def test_inspect_reads_manifest_and_stored_paths(self) -> None:
@@ -76,12 +106,35 @@ class BuildInspectOciTests(unittest.TestCase):
             self.assertEqual(result.metadata["manifest"]["version"], "0.1")
             self.assertEqual(
                 result.metadata["manifest"]["requiredVars"],
-                ["OPENAI_API_KEY"],
+                ["OPENAI_API_KEY", "SYNTHETIC_MCP_TOKEN"],
+            )
+            self.assertEqual(
+                result.metadata["manifest"]["mcp"]["servers"],
+                [
+                    {
+                        "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+                        "bundlePath": "mcp/servers/workspace-files.json",
+                        "command": "npx",
+                        "name": "workspace-files",
+                        "requiredVarNames": [],
+                        "transport": "stdio",
+                    },
+                    {
+                        "bearerTokenEnvVar": "SYNTHETIC_MCP_TOKEN",
+                        "bundlePath": "mcp/servers/docs-http.json",
+                        "name": "docs-http",
+                        "requiredVarNames": ["SYNTHETIC_MCP_TOKEN"],
+                        "transport": "http",
+                        "url": "https://example.com/mcp",
+                    },
+                ],
             )
             self.assertIn("instructions/main/AGENTS.md", result.stored_paths)
             self.assertIn("instructions/includes/style.md", result.stored_paths)
             self.assertIn("skills/code-review", result.stored_paths)
             self.assertIn("skills/refactor", result.stored_paths)
+            self.assertIn("mcp/servers/workspace-files.json", result.stored_paths)
+            self.assertIn("mcp/servers/docs-http.json", result.stored_paths)
 
 
 def _read_member(tf: tarfile.TarFile, name: str) -> bytes:
@@ -99,4 +152,3 @@ def _blob_name(digest: str) -> str:
 
 if __name__ == "__main__":
     unittest.main()
-

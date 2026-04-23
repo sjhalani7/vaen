@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Collection
+from pathlib import Path, PurePosixPath
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python < 3.11 compatibility.
+    tomllib = None
 
 from .importer import (
     derive_activated_paths,
+    derive_mcp_client_target_paths,
     resolve_import_target_overrides,
 )
 
@@ -30,6 +35,7 @@ def run_doctor(
     target: str | None = None,
     target_instructions_file_name: str | None = None,
     target_skills_directory: str | None = None,
+    client: str | None = None,
 ) -> DoctorResult:
     """Run structural checks for an imported VAEN setup."""
 
@@ -42,6 +48,11 @@ def run_doctor(
     activated_paths = derive_activated_paths(
         target_repo=repo_root,
         overrides=overrides,
+    )
+    mcp_client_paths = (
+        derive_mcp_client_target_paths(target_repo=repo_root, client=client)
+        if client is not None
+        else None
     )
     checks_run: list[str] = []
     warnings: list[str] = []
@@ -67,15 +78,6 @@ def run_doctor(
             checks_run=tuple(checks_run),
         )
 
-    # Task 32: discover only repo-local `.env` (no shell env lookup).
-    checks_run.append("repo-dotenv-discovery")
-    env_path = discover_repo_env_file(repo_root)
-    if env_path is None:
-        warnings.append(f"Missing repo .env file (if needed): {repo_root / '.env'}")
-        env_var_names: set[str] = set()
-    else:
-        env_var_names = parse_repo_env_file(env_path)
-
     bundles = _discover_canonical_bundles(repo_root)
     checks_run.append("imported-bundle-presence")
     if not bundles:
@@ -94,9 +96,37 @@ def run_doctor(
             errors.append(f"Missing mirrored skills directory: {path}")
 
     for bundle_dir in bundles:
-        _check_bundle_structure(bundle_dir, checks_run, errors)
-        if env_path is not None:
-            _check_bundle_required_vars(bundle_dir, env_var_names, checks_run, errors)
+        _check_bundle_structure(bundle_dir, checks_run, warnings, errors)
+        manifest_doc = _read_bundle_manifest_metadata(bundle_dir, errors)
+        _check_bundle_canonical_mcp_files(bundle_dir, manifest_doc, checks_run, errors)
+        _report_bundle_required_vars(
+            bundle_dir,
+            manifest_doc,
+            checks_run,
+            warnings,
+            errors,
+        )
+
+    if mcp_client_paths is not None:
+        checks_run.append(f"mcp-client-config-exists:{mcp_client_paths.client}")
+        if not mcp_client_paths.config_path.is_file():
+            errors.append(
+                "Missing activated MCP client config file "
+                f"for '{mcp_client_paths.client}': {mcp_client_paths.config_path}"
+            )
+        elif mcp_client_paths.client == "codex":
+            _check_codex_mcp_config_toml_syntax(
+                mcp_client_paths.config_path,
+                checks_run,
+                errors,
+            )
+        elif mcp_client_paths.client in {"claude", "copilot"}:
+            _check_json_mcp_config_syntax(
+                mcp_client_paths.config_path,
+                mcp_client_paths.client,
+                checks_run,
+                errors,
+            )
 
     return DoctorResult(
         target_repo=repo_root,
@@ -121,41 +151,6 @@ def resolve_doctor_target(
     return target.resolve()
 
 
-def discover_repo_env_file(repo_root: Path) -> Path | None:
-    """Return `<target-repo>/.env` when present, else `None`."""
-
-    env_path = repo_root / ".env"
-    if env_path.is_file():
-        return env_path
-    return None
-
-
-def parse_repo_env_file(env_path: Path) -> set[str]:
-    """Parse a `.env` file and return declared variable names only.
-
-    Parsing is intentionally simple and tolerant:
-    - blank lines and `#` comments are ignored
-    - lines without `=` are ignored
-    - optional leading `export ` is stripped
-    """
-
-    result: set[str] = set()
-    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("export "):
-            line = line[len("export ") :].lstrip()
-        if "=" not in line:
-            continue
-        key, _ = line.split("=", 1)
-        key = key.strip()
-        if not key:
-            continue
-        result.add(key)
-    return result
-
-
 def _discover_canonical_bundles(repo_root: Path) -> tuple[Path, ...]:
     agent_root = repo_root / ".agent"
     if not agent_root.is_dir():
@@ -169,7 +164,12 @@ def _discover_canonical_bundles(repo_root: Path) -> tuple[Path, ...]:
     return tuple(sorted(bundles, key=lambda path: path.name))
 
 
-def _check_bundle_structure(bundle_dir: Path, checks_run: list[str], errors: list[str]) -> None:
+def _check_bundle_structure(
+    bundle_dir: Path,
+    checks_run: list[str],
+    warnings: list[str],
+    errors: list[str],
+) -> None:
     bundle_name = bundle_dir.name
 
     metadata_path = bundle_dir / "vaen" / "metadata.json"
@@ -185,37 +185,140 @@ def _check_bundle_structure(bundle_dir: Path, checks_run: list[str], errors: lis
     skills_dir = bundle_dir / "skills"
     checks_run.append(f"bundle:{bundle_name}:skills-dir-exists")
     if not skills_dir.is_dir():
-        errors.append(f"Missing canonical skills directory: {skills_dir}")
+        warnings.append(
+            "Missing canonical skills directory: "
+            f"{skills_dir}. This may simply mean the user did not package skills."
+        )
 
 
-def _check_bundle_required_vars(
-    bundle_dir: Path,
-    env_var_names: Collection[str],
-    checks_run: list[str],
-    errors: list[str],
-) -> None:
-    bundle_name = bundle_dir.name
-    checks_run.append(f"bundle:{bundle_name}:required-vars-present")
-
+def _read_bundle_manifest_metadata(bundle_dir: Path, errors: list[str]) -> dict | None:
     metadata_path = bundle_dir / "vaen" / "metadata.json"
     if not metadata_path.is_file():
-        return
+        return None
 
     try:
         metadata_doc = json.loads(metadata_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         errors.append(f"Malformed canonical metadata file: {metadata_path}")
-        return
+        return None
 
     if not isinstance(metadata_doc, dict):
         errors.append(f"Malformed canonical metadata file: {metadata_path}")
-        return
+        return None
 
     manifest_doc = metadata_doc.get("manifest", {})
     if not isinstance(manifest_doc, dict):
         errors.append(f"Malformed canonical manifest metadata in: {metadata_path}")
+        return None
+
+    return manifest_doc
+
+
+def _check_bundle_canonical_mcp_files(
+    bundle_dir: Path,
+    manifest_doc: dict | None,
+    checks_run: list[str],
+    errors: list[str],
+) -> None:
+    bundle_name = bundle_dir.name
+    checks_run.append(f"bundle:{bundle_name}:canonical-mcp-files-exist")
+
+    if manifest_doc is None:
         return
 
+    metadata_path = bundle_dir / "vaen" / "metadata.json"
+    mcp_raw = manifest_doc.get("mcp")
+    if mcp_raw is None:
+        return
+    if not isinstance(mcp_raw, dict):
+        errors.append(f"Malformed MCP metadata in: {metadata_path}")
+        return
+
+    servers_raw = mcp_raw.get("servers", [])
+    if servers_raw is None:
+        servers_raw = []
+    if not isinstance(servers_raw, list):
+        errors.append(f"Malformed MCP servers metadata in: {metadata_path}")
+        return
+
+    for server in servers_raw:
+        if not isinstance(server, dict):
+            errors.append(f"Malformed MCP servers metadata in: {metadata_path}")
+            return
+
+        raw_path = server.get("bundlePath")
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            errors.append(f"Malformed MCP bundlePath metadata in: {metadata_path}")
+            return
+
+        bundle_path = PurePosixPath(raw_path)
+        if (
+            bundle_path.is_absolute()
+            or ".." in bundle_path.parts
+            or not bundle_path.parts
+            or bundle_path.parts[0] != "mcp"
+        ):
+            errors.append(f"Malformed MCP bundlePath metadata in: {metadata_path}")
+            return
+
+        canonical_path = bundle_dir.joinpath(*bundle_path.parts)
+        if not canonical_path.is_file():
+            errors.append(f"Missing canonical MCP file: {canonical_path}")
+
+
+def _check_codex_mcp_config_toml_syntax(
+    config_path: Path,
+    checks_run: list[str],
+    errors: list[str],
+) -> None:
+    checks_run.append("mcp-client-config-toml-syntax:codex")
+    if tomllib is None:
+        return
+
+    try:
+        with config_path.open("rb") as config_file:
+            tomllib.load(config_file)
+    except tomllib.TOMLDecodeError:
+        errors.append(f"Malformed activated Codex MCP config TOML: {config_path}")
+    except OSError:
+        errors.append(f"Unable to read activated Codex MCP config file: {config_path}")
+
+
+def _check_json_mcp_config_syntax(
+    config_path: Path,
+    client: str,
+    checks_run: list[str],
+    errors: list[str],
+) -> None:
+    checks_run.append(f"mcp-client-config-json-syntax:{client}")
+    client_label = client.capitalize()
+
+    try:
+        json.loads(config_path.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        errors.append(
+            f"Malformed activated {client_label} MCP config JSON: {config_path}"
+        )
+    except OSError:
+        errors.append(
+            f"Unable to read activated {client_label} MCP config file: {config_path}"
+        )
+
+
+def _report_bundle_required_vars(
+    bundle_dir: Path,
+    manifest_doc: dict | None,
+    checks_run: list[str],
+    warnings: list[str],
+    errors: list[str],
+) -> None:
+    bundle_name = bundle_dir.name
+    checks_run.append(f"bundle:{bundle_name}:required-vars-metadata")
+
+    if manifest_doc is None:
+        return
+
+    metadata_path = bundle_dir / "vaen" / "metadata.json"
     required_raw = manifest_doc.get("requiredVars", [])
     if required_raw is None:
         required_raw = []
@@ -230,9 +333,8 @@ def _check_bundle_required_vars(
             return
         required_vars.append(item.strip())
 
-    missing = [name for name in required_vars if name not in env_var_names]
-    if missing:
-        rendered = ", ".join(sorted(missing))
-        errors.append(
-            f"Missing required vars for bundle '{bundle_name}' in .env: {rendered}"
+    if required_vars:
+        rendered = ", ".join(sorted(required_vars))
+        warnings.append(
+            f"Required env vars declared by bundle '{bundle_name}': {rendered}"
         )
