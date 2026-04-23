@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 
 from .errors import ManifestError, ManifestValidationError
 
@@ -12,6 +12,7 @@ _DEFAULT_MANIFEST_NAME = "agent.yaml"
 _ALLOWED_ARTIFACT_TYPES = {"skills"}
 _ALLOWED_INSTRUCTION_KEYS = {"main", "includes"}
 _ALLOWED_ARTIFACT_KEYS = {"type", "path"}
+MCPTransport = Literal["stdio", "http"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +41,36 @@ class ArtifactSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class MCPStdioServerSpec:
+    """Neutral MCP server definition for stdio-backed servers."""
+
+    name: str
+    transport: Literal["stdio"] = "stdio"
+    command: str = ""
+    args: tuple[str, ...] = ()
+    cwd: str | None = None
+    env_vars: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class MCPHttpServerSpec:
+    """Neutral MCP server definition for HTTP-backed servers."""
+
+    name: str
+    transport: Literal["http"] = "http"
+    url: str = ""
+    bearer_token_env_var: str | None = None
+    header_env_vars: Mapping[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class MCPSpec:
+    """Top-level MCP definition for an agent bundle."""
+
+    servers: tuple[MCPStdioServerSpec | MCPHttpServerSpec, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class Manifest:
     """Validated VAEN manifest model."""
 
@@ -47,6 +78,7 @@ class Manifest:
     publisher: str
     instructions: InstructionsSpec
     artifacts: tuple[ArtifactSpec, ...]
+    mcp: MCPSpec | None = None
     required_vars: tuple[str, ...] = ()
     source_path: Path | None = None
     source_root: Path | None = None
@@ -132,12 +164,14 @@ def _manifest_from_mapping(mapping: Mapping[str, Any], *, source_path: Path) -> 
     source_root = source_path.parent
     instructions = _parse_instructions(mapping.get("instructions"), source_root)
     artifacts = _parse_artifacts(mapping.get("artifacts"), source_root)
+    mcp = _parse_mcp(mapping.get("mcp"))
     required_vars = _parse_required_vars(mapping.get("requiredVars"))
 
     extra = {
         key: value
         for key, value in mapping.items()
-        if key not in {"version", "publisher", "instructions", "artifacts", "requiredVars"}
+        if key
+        not in {"version", "publisher", "instructions", "artifacts", "mcp", "requiredVars"}
     }
 
     return Manifest(
@@ -145,6 +179,7 @@ def _manifest_from_mapping(mapping: Mapping[str, Any], *, source_path: Path) -> 
         publisher=publisher,
         instructions=instructions,
         artifacts=artifacts,
+        mcp=mcp,
         required_vars=required_vars,
         source_path=source_path,
         source_root=source_root,
@@ -235,6 +270,74 @@ def _parse_artifacts(raw: Any, source_root: Path) -> tuple[ArtifactSpec, ...]:
     return tuple(artifacts)
 
 
+def _parse_mcp(raw: Any) -> MCPSpec | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise ManifestValidationError("mcp must be a mapping")
+
+    servers_raw = raw.get("servers", [])
+    if not isinstance(servers_raw, list):
+        raise ManifestValidationError("mcp.servers must be a list")
+
+    servers: list[MCPStdioServerSpec | MCPHttpServerSpec] = []
+    seen_names: set[str] = set()
+    for index, item in enumerate(servers_raw):
+        if not isinstance(item, Mapping):
+            raise ManifestValidationError(f"mcp.servers[{index}] must be a mapping")
+        server = _parse_mcp_server(item, index=index)
+        if server.name in seen_names:
+            raise ManifestValidationError(
+                f"mcp.servers[{index}].name must be unique within mcp.servers"
+            )
+        seen_names.add(server.name)
+        servers.append(server)
+
+    return MCPSpec(servers=tuple(servers))
+
+
+def _parse_mcp_server(
+    raw: Mapping[str, Any],
+    *,
+    index: int,
+) -> MCPStdioServerSpec | MCPHttpServerSpec:
+    context = f"mcp.servers[{index}]"
+    name = _require_string(raw, "name", context=context)
+    transport = _require_string(raw, "transport", context=context)
+
+    if transport == "stdio":
+        command = _require_string(raw, "command", context=context)
+        args = _parse_string_list(raw.get("args", []), context=f"{context}.args")
+        cwd = _optional_string(raw.get("cwd"), context=f"{context}.cwd")
+        env_vars = _parse_string_list(raw.get("env_vars", []), context=f"{context}.env_vars")
+        return MCPStdioServerSpec(
+            name=name,
+            command=command,
+            args=args,
+            cwd=cwd,
+            env_vars=env_vars,
+        )
+
+    if transport == "http":
+        url = _require_string(raw, "url", context=context)
+        bearer_token_env_var = _optional_string(
+            raw.get("bearer_token_env_var"),
+            context=f"{context}.bearer_token_env_var",
+        )
+        header_env_vars = _parse_string_mapping(
+            raw.get("header_env_vars", {}),
+            context=f"{context}.header_env_vars",
+        )
+        return MCPHttpServerSpec(
+            name=name,
+            url=url,
+            bearer_token_env_var=bearer_token_env_var,
+            header_env_vars=header_env_vars,
+        )
+
+    raise ManifestValidationError(f"{context}.transport must be one of: ['http', 'stdio']")
+
+
 def _parse_required_vars(raw: Any) -> tuple[str, ...]:
     if raw is None:
         return ()
@@ -250,6 +353,46 @@ def _parse_required_vars(raw: Any) -> tuple[str, ...]:
         required_vars.append(item)
 
     return tuple(required_vars)
+
+
+def _parse_string_list(raw: Any, *, context: str) -> tuple[str, ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ManifestValidationError(f"{context} must be a list of strings")
+
+    values: list[str] = []
+    for index, item in enumerate(raw):
+        if not isinstance(item, str) or not item.strip():
+            raise ManifestValidationError(f"{context}[{index}] must be a non-empty string")
+        values.append(item)
+
+    return tuple(values)
+
+
+def _parse_string_mapping(raw: Any, *, context: str) -> Mapping[str, str]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, Mapping):
+        raise ManifestValidationError(f"{context} must be a mapping of strings")
+
+    values: dict[str, str] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str) or not key.strip():
+            raise ManifestValidationError(f"{context} keys must be non-empty strings")
+        if not isinstance(value, str) or not value.strip():
+            raise ManifestValidationError(f"{context}.{key} must be a non-empty string")
+        values[key] = value
+
+    return values
+
+
+def _optional_string(raw: Any, *, context: str) -> str | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw.strip():
+        raise ManifestValidationError(f"{context} must be a non-empty string")
+    return raw
 
 
 def _require_string(

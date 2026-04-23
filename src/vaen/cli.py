@@ -5,18 +5,21 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Any, Mapping
 
 from .build import build_agent
 from .doctor import run_doctor
-from .errors import VAENError
+from .errors import BundleImportError, VAENError
 from .importer import (
     cleanup_canonical_bundle,
     create_root_instruction_shims,
+    ensure_mcp_client_target_available,
     extract_canonical_bundle,
     mirror_imported_skills,
     prepare_import_plan,
     resolve_import_target,
     resolve_import_target_overrides,
+    write_selected_client_mcp_config,
 )
 from .inspect import format_inspect_output, inspect_agent_archive
 from .manifest import load_manifest
@@ -58,6 +61,17 @@ def main(argv: list[str] | None = None) -> int:
                 target_skills_directory=args.target_skills_directory,
             )
             plan = prepare_import_plan(args.archive)
+            if plan.mcp_servers and args.client is None:
+                raise BundleImportError(
+                    "Import requires --client when the bundle contains MCP servers."
+                )
+            mcp_target_paths = None
+            if plan.mcp_servers and args.client is not None:
+                mcp_target_paths = ensure_mcp_client_target_available(
+                    target_repo=repo_root,
+                    archive_path=args.archive,
+                    client=args.client,
+                )
             canonical_destination = extract_canonical_bundle(
                 archive_path=args.archive,
                 target_repo=repo_root,
@@ -74,7 +88,16 @@ def main(argv: list[str] | None = None) -> int:
                 target_repo=repo_root,
                 overrides=overrides,
             )
+            if mcp_target_paths is not None:
+                write_selected_client_mcp_config(
+                    plan=plan,
+                    target_paths=mcp_target_paths,
+                )
             print(f"Import complete. Canonical bundle extracted to {canonical_destination}")
+            mcp_env_var_names = _collect_mcp_required_env_var_names(plan.metadata)
+            if mcp_env_var_names:
+                joined_names = ", ".join(mcp_env_var_names)
+                print(f"MCP env vars to set locally: {joined_names}")
             return 0
 
         if args.command == "doctor":
@@ -84,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
                 target=args.target,
                 target_instructions_file_name=args.target_instructions_file_name,
                 target_skills_directory=args.target_skills_directory,
+                client=args.client,
             )
             status = "PASS" if result.passed else "FAIL"
             print(f"Doctor {status}: {result.target_repo}")
@@ -119,8 +143,7 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="vaen",
         description=(
             "VAEN v1 CLI for OCI-backed `.agent` bundles: validate, build, inspect, "
-            "import, doctor, and cleanup. MCP tool configuration support is planned for "
-            "a later phase."
+            "import, doctor, and cleanup."
         ),
     )
     subparsers = parser.add_subparsers(dest="command")
@@ -189,12 +212,20 @@ def _build_parser() -> argparse.ArgumentParser:
             "(for example: copilot -> .copilot/skills)."
         ),
     )
+    import_parser.add_argument(
+        "--client",
+        choices=("codex", "claude", "copilot"),
+        help=(
+            "Optional project-scoped MCP client target "
+            "(codex, claude, or copilot). Required when the bundle contains MCP servers."
+        ),
+    )
 
     doctor_parser = subparsers.add_parser(
         "doctor",
         help=(
             "Run setup validation checks for an imported repository "
-            "(including requiredVars from .env and target-derived activated paths)."
+            "(including requiredVars metadata and target-derived activated paths)."
         ),
     )
     doctor_parser.add_argument(
@@ -222,6 +253,14 @@ def _build_parser() -> argparse.ArgumentParser:
             "(for example: copilot -> .copilot/skills)."
         ),
     )
+    doctor_parser.add_argument(
+        "--client",
+        choices=("codex", "claude", "copilot"),
+        help=(
+            "Optional project-scoped MCP client target for MCP config checks "
+            "(codex, claude, or copilot)."
+        ),
+    )
 
     cleanup_parser = subparsers.add_parser(
         "cleanup",
@@ -237,3 +276,35 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     return parser
+
+
+def _collect_mcp_required_env_var_names(metadata: Mapping[str, Any] | Any) -> tuple[str, ...]:
+    """Return stable MCP-required env var names from import-plan metadata."""
+
+    if not isinstance(metadata, Mapping):
+        return ()
+
+    manifest_metadata = metadata.get("manifest")
+    if not isinstance(manifest_metadata, Mapping):
+        return ()
+
+    mcp_metadata = manifest_metadata.get("mcp")
+    if not isinstance(mcp_metadata, Mapping):
+        return ()
+
+    servers = mcp_metadata.get("servers")
+    if not isinstance(servers, list):
+        return ()
+
+    env_var_names: list[str] = []
+    for server in servers:
+        if not isinstance(server, Mapping):
+            continue
+        required_var_names = server.get("requiredVarNames")
+        if not isinstance(required_var_names, list):
+            continue
+        for env_var_name in required_var_names:
+            if isinstance(env_var_name, str) and env_var_name not in env_var_names:
+                env_var_names.append(env_var_name)
+
+    return tuple(env_var_names)

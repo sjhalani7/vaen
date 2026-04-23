@@ -143,8 +143,6 @@ class ImportTargetValidationTests(unittest.TestCase):
                 target_repo=target_repo,
                 overrides=resolve_import_target_overrides(),
             )
-            (target_repo / ".env").write_text("OPENAI_API_KEY=test-key\n", encoding="utf-8")
-
             result = run_doctor(target_repo=target_repo)
             self.assertTrue(result.passed)
             self.assertFalse(result.errors)
@@ -215,8 +213,6 @@ class ImportTargetValidationTests(unittest.TestCase):
                 target_repo=target_repo,
                 overrides=overrides,
             )
-            (target_repo / ".env").write_text("OPENAI_API_KEY=test-key\n", encoding="utf-8")
-
             result = run_doctor(target_repo=target_repo, target="copilot")
             self.assertTrue(result.passed)
             self.assertFalse(result.errors)
@@ -293,8 +289,6 @@ class ImportTargetValidationTests(unittest.TestCase):
                 target_repo=target_repo,
                 overrides=overrides,
             )
-            (target_repo / ".env").write_text("OPENAI_API_KEY=test-key\n", encoding="utf-8")
-
             result = run_doctor(
                 target_repo=target_repo,
                 target_instructions_file_name="copilot-instructions",
@@ -376,8 +370,6 @@ class ImportTargetValidationTests(unittest.TestCase):
                 target_repo=target_repo,
                 overrides=overrides,
             )
-            (target_repo / ".env").write_text("OPENAI_API_KEY=test-key\n", encoding="utf-8")
-
             result = run_doctor(
                 target_repo=target_repo,
                 target_skills_directory="copilot",
