@@ -35,30 +35,20 @@ class ImportSkillMirrorConflictTests(unittest.TestCase):
         )
         return target_repo, canonical_destination, plan
 
-    def test_import_fails_when_agent_skill_name_already_exists(self) -> None:
-        target_repo, canonical_destination, plan = self._prepare_import_state()
+    def test_import_fails_when_mirrored_skill_name_already_exists(self) -> None:
         # Any existing incoming skill root should block mirror import.
-        (target_repo / ".agent" / "skills" / "code-review").mkdir(parents=True)
+        for existing_root in (Path(".agent/skills/code-review"), Path(".claude/skills/code-review")):
+            with self.subTest(existing_root=str(existing_root)):
+                target_repo, canonical_destination, plan = self._prepare_import_state()
+                (target_repo / existing_root).mkdir(parents=True)
 
-        with self.assertRaises(BundleImportError) as ctx:
-            mirror_imported_skills(
-                canonical_destination=canonical_destination,
-                plan=plan,
-                target_repo=target_repo,
-            )
-        self.assertIn("Mirrored skill name already exists", str(ctx.exception))
-
-    def test_import_fails_when_claude_skill_name_already_exists(self) -> None:
-        target_repo, canonical_destination, plan = self._prepare_import_state()
-        (target_repo / ".claude" / "skills" / "code-review").mkdir(parents=True)
-
-        with self.assertRaises(BundleImportError) as ctx:
-            mirror_imported_skills(
-                canonical_destination=canonical_destination,
-                plan=plan,
-                target_repo=target_repo,
-            )
-        self.assertIn("Mirrored skill name already exists", str(ctx.exception))
+                with self.assertRaises(BundleImportError) as ctx:
+                    mirror_imported_skills(
+                        canonical_destination=canonical_destination,
+                        plan=plan,
+                        target_repo=target_repo,
+                    )
+                self.assertIn("Mirrored skill name already exists", str(ctx.exception))
 
 
 if __name__ == "__main__":

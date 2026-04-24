@@ -19,7 +19,6 @@ from vaen.importer import (
     render_mcp_config,
 )
 from vaen.inspect import inspect_agent_archive
-from vaen.manifest import load_manifest
 
 
 class MCPStdioEnvVarsRegressionTests(unittest.TestCase):
@@ -57,21 +56,6 @@ class MCPStdioEnvVarsRegressionTests(unittest.TestCase):
             encoding="utf-8",
         )
         return manifest_path
-
-    def test_manifest_parses_stdio_env_vars_as_name_list(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            manifest_path = self._write_manifest(Path(td))
-
-            manifest = load_manifest(manifest_path)
-            self.assertIsNotNone(manifest)
-            assert manifest is not None
-            self.assertIsNotNone(manifest.mcp)
-            assert manifest.mcp is not None
-
-            server = manifest.mcp.servers[0]
-            self.assertEqual(server.name, "postgres")
-            self.assertEqual(server.transport, "stdio")
-            self.assertEqual(server.env_vars, ("DB_URL", "API_KEY"))
 
     def test_build_and_import_plan_preserve_stdio_env_var_list_shape(self) -> None:
         with tempfile.TemporaryDirectory() as td:

@@ -39,29 +39,19 @@ class ImportRootShimConflictTests(unittest.TestCase):
         )
         return target_repo, canonical_destination, plan
 
-    def test_import_fails_when_root_agents_exists(self) -> None:
-        target_repo, canonical_destination, plan = self._prepare_import_state()
-        (target_repo / "AGENTS.md").write_text("existing", encoding="utf-8")
+    def test_import_fails_when_root_instruction_shim_already_exists(self) -> None:
+        for existing_name in ("AGENTS.md", "CLAUDE.md"):
+            with self.subTest(existing_name=existing_name):
+                target_repo, canonical_destination, plan = self._prepare_import_state()
+                (target_repo / existing_name).write_text("existing", encoding="utf-8")
 
-        with self.assertRaises(BundleImportError) as ctx:
-            create_root_instruction_shims(
-                canonical_destination=canonical_destination,
-                plan=plan,
-                target_repo=target_repo,
-            )
-        self.assertIn("Root instruction shim already exists", str(ctx.exception))
-
-    def test_import_fails_when_root_claude_exists(self) -> None:
-        target_repo, canonical_destination, plan = self._prepare_import_state()
-        (target_repo / "CLAUDE.md").write_text("existing", encoding="utf-8")
-
-        with self.assertRaises(BundleImportError) as ctx:
-            create_root_instruction_shims(
-                canonical_destination=canonical_destination,
-                plan=plan,
-                target_repo=target_repo,
-            )
-        self.assertIn("Root instruction shim already exists", str(ctx.exception))
+                with self.assertRaises(BundleImportError) as ctx:
+                    create_root_instruction_shims(
+                        canonical_destination=canonical_destination,
+                        plan=plan,
+                        target_repo=target_repo,
+                    )
+                self.assertIn("Root instruction shim already exists", str(ctx.exception))
 
 
 if __name__ == "__main__":
