@@ -8,5 +8,6 @@ __pycache__/
 .eggs/
 *.md
 !/README.md
+!examples/**/*.md
 build/
 dist/
