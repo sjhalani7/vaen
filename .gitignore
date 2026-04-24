@@ -9,5 +9,6 @@ __pycache__/
 *.md
 !/README.md
 !examples/**/*.md
+!docs/quick-start.md
 build/
 dist/

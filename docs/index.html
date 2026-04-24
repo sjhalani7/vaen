@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="VAEN packages agentic coding harnesses into portable .agent archives from a user-authored agent.yaml manifest."
+    >
+    <title>VAEN - Portable Agent Setup Bundles</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="VAEN home">
+        <span class="brand-mark" aria-hidden="true">V</span>
+        <span>VAEN</span>
+      </a>
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a href="#workflow">Workflow</a>
+        <a href="#quick-start">Quick start</a>
+        <a href="#examples">YAML</a>
+        <a href="#mcp">MCP</a>
+        <a href="#safety">Safety</a>
+        <a href="#faq">FAQ</a>
+        <a href="https://github.com/sjhalani7/vaen">GitHub</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="section-inner hero-grid">
+          <div class="hero-copy">
+            <p class="eyebrow">Portable agent harness sharing</p>
+            <h1>Share agent setups without manual file packing.</h1>
+            <p class="hero-lede">
+              An agent setup is the instruction files, reusable skills, and
+              optional tool config that tell a coding assistant how to behave in a
+              repo.
+            </p>
+            <p class="hero-lede">
+              Today, sharing one usually means manually collecting those files,
+              then hoping another person unzips them into the right places.
+            </p>
+            <p class="hero-lede">
+              VAEN replaces that with a manifest and a CLI flow: you write <code>agent.yaml</code>,
+              VAEN builds the single shareable <code>.agent</code> archive with the
+              declared setup files and metadata, and the receiver imports it with
+              one command.
+            </p>
+            <div class="hero-actions" aria-label="Primary actions">
+              <a class="button primary" href="#quick-start">Start with a bundle</a>
+              <a class="button secondary" href="https://github.com/sjhalani7/vaen">View GitHub repo</a>
+            </div>
+          </div>
+
+          <aside class="command-card" aria-label="VAEN command summary">
+            <pre><code>pipx install git+https://github.com/sjhalani7/vaen.git
+
+vaen validate -f agent.yaml
+vaen build -f agent.yaml -o team-setup.agent
+vaen inspect team-setup.agent
+vaen import team-setup.agent --client codex
+vaen doctor --client codex</code></pre>
+          </aside>
+        </div>
+      </section>
+
+      <section class="section section-white" aria-labelledby="what-vaen-does">
+        <div class="section-inner intro-grid">
+          <div>
+            <p class="eyebrow">What VAEN does</p>
+            <h2 id="what-vaen-does">Turns an agent setup into a portable archive.</h2>
+            <p>
+              An <code>agent.yaml</code> file is the recipe for the bundle. It tells
+              VAEN which instruction file is the main entry point, which optional
+              files and skill directories belong with it, which MCP servers should be
+              declared, and which credential variable names the receiver needs to
+              provide locally.
+            </p>
+          </div>
+          <div class="card-grid">
+            <article class="info-card">
+              <h3>Why it exists</h3>
+              <ul>
+                <li>There is no common package format for agentic coding harnesses.</li>
+                <li>Manual zip-and-copy sharing is easy to get wrong.</li>
+                <li>Receivers should not need to guess where every file belongs.</li>
+                <li>Teams need a repeatable way to inspect and import setups.</li>
+              </ul>
+            </article>
+            <article class="info-card">
+              <h3>What <code>agent.yaml</code> does</h3>
+              <ul>
+                <li>Names the files and directories that make up the harness.</li>
+                <li>Separates credential variable names from credential values.</li>
+                <li>Gives VAEN enough structure to validate, build, and inspect.</li>
+                <li>Lets imports recreate the setup in the right target locations.</li>
+              </ul>
+            </article>
+            <article class="info-card">
+              <h3>Included in bundles</h3>
+              <ul>
+                <li>Main instructions and optional instruction includes</li>
+                <li>Skill directories and their files</li>
+                <li>Project-scoped MCP declarations</li>
+                <li>Metadata used for import, inspection, and validation</li>
+              </ul>
+            </article>
+            <article class="info-card">
+              <h3>Keep out of bundles</h3>
+              <ul>
+                <li>Builders should exclude credential values, <code>.env</code> files, and private keys</li>
+                <li>Builders should leave out OAuth state, keychains, and local secret stores</li>
+                <li>MCP server implementations are referenced, not bundled</li>
+                <li>Dependency caches and runtime environments stay outside the bundle</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="workflow" class="section section-tint">
+        <div class="section-inner">
+          <div class="section-heading">
+            <p class="eyebrow">Workflow</p>
+            <h2>Validate, build, inspect, import, verify, and clean up.</h2>
+            <p>
+              The manifest is the source of truth. VAEN checks the manifest,
+              builds a portable archive, shows what is inside, imports it into the
+              target repository, and verifies the materialized structure.
+            </p>
+          </div>
+          <ol class="workflow-list">
+            <li>
+              <span class="step-number">01</span>
+              <h3>Validate</h3>
+              <p>Check required fields, supported artifact types, paths, and declaration structure.</p>
+              <code>vaen validate -f agent.yaml</code>
+            </li>
+            <li>
+              <span class="step-number">02</span>
+              <h3>Build</h3>
+              <p>Create an OCI-style archive. If <code>-o</code> is omitted, VAEN writes a default <code>.agent</code> name.</p>
+              <code>vaen build -f agent.yaml -o team-setup.agent</code>
+            </li>
+            <li>
+              <span class="step-number">03</span>
+              <h3>Inspect</h3>
+              <p>Print bundle metadata, normalized paths, instructions, skills, MCP declarations, and required variable names.</p>
+              <code>vaen inspect team-setup.agent</code>
+            </li>
+            <li>
+              <span class="step-number">04</span>
+              <h3>Import</h3>
+              <p>Write the canonical stored copy first, then activate files for the target repository and selected client.</p>
+              <code>vaen import team-setup.agent --client codex</code>
+            </li>
+            <li>
+              <span class="step-number">05</span>
+              <h3>Doctor</h3>
+              <p>Report required names and check structure, placement, and local config syntax.</p>
+              <code>vaen doctor --client codex</code>
+            </li>
+            <li>
+              <span class="step-number">06</span>
+              <h3>Cleanup</h3>
+              <p>Remove only the canonical stored copy after activated files have been reviewed.</p>
+              <code>vaen cleanup team-setup.agent</code>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section id="install" class="section section-white">
+        <div class="section-inner two-column">
+          <div>
+            <p class="eyebrow">Install</p>
+            <h2>Install from GitHub or a local clone.</h2>
+            <p>
+              The CLI provides <code>validate</code>, <code>build</code>,
+              <code>inspect</code>, <code>import</code>, <code>doctor</code>, and
+              <code>cleanup</code>.
+            </p>
+          </div>
+          <div class="code-stack">
+            <figure>
+              <figcaption>Install with pipx</figcaption>
+              <pre><code>pipx install git+https://github.com/sjhalani7/vaen.git</code></pre>
+            </figure>
+            <figure>
+              <figcaption>Editable local install</figcaption>
+              <pre><code>python3 -m venv .venv
+. .venv/bin/activate
+pip install -e .</code></pre>
+            </figure>
+          </div>
+        </div>
+      </section>
+
+      <section id="quick-start" class="section section-tint">
+        <div class="section-inner two-column">
+          <div>
+            <p class="eyebrow">Quick start</p>
+            <h2>Create an instructions-only bundle.</h2>
+            <p>
+              A minimal bundle needs one instruction file and an
+              <code>agent.yaml</code> manifest. You do not create the
+              <code>.agent</code> archive by hand. VAEN reads the manifest, validates
+              the declared files, creates the archive, and later imports it into the
+              right repository locations.
+            </p>
+            <p>
+              The source quick-start is available at
+              <a href="quick-start.md">docs/quick-start.md</a>.
+            </p>
+          </div>
+          <div class="code-stack">
+            <figure>
+              <figcaption>Create the instruction file</figcaption>
+              <pre><code>mkdir my-agent
+cd my-agent
+printf "# Agent Instructions\n\nUse concise, direct answers.\n" &gt; AGENTS.md</code></pre>
+            </figure>
+            <figure>
+              <figcaption>agent.yaml</figcaption>
+              <pre><code>version: "0.1"
+publisher: "Your Name"
+
+instructions:
+  main: "./AGENTS.md"
+
+artifacts: []</code></pre>
+            </figure>
+            <figure>
+              <figcaption>Build and import</figcaption>
+              <pre><code>vaen validate -f agent.yaml
+vaen build -f agent.yaml -o my-agent.agent
+vaen inspect my-agent.agent
+
+mkdir ../target-repo
+cd ../target-repo
+vaen import ../my-agent/my-agent.agent
+vaen doctor</code></pre>
+            </figure>
+          </div>
+        </div>
+      </section>
+
+      <section id="examples" class="section section-white">
+        <div class="section-inner">
+          <div class="section-heading">
+            <p class="eyebrow">YAML examples</p>
+            <h2>Declare instructions, skills, variable names, and MCP servers.</h2>
+            <p>
+              <code>version</code>, <code>publisher</code>, and
+              <code>instructions.main</code> are required. <code>artifacts</code>
+              is a list and may be empty. <code>requiredVars</code> and MCP env
+              fields store credential variable names only, never values.
+            </p>
+          </div>
+
+          <div class="example-grid">
+            <figure>
+              <figcaption>Instructions with skills</figcaption>
+              <pre><code>version: "0.1"
+publisher: "Your Name"
+
+instructions:
+  main: "./AGENTS.md"
+  includes:
+    - "./style.md"
+
+artifacts:
+  - type: skills
+    path: "./skills/code-review"
+  - type: skills
+    path: "./skills/refactor"</code></pre>
+            </figure>
+
+            <figure>
+              <figcaption>Variable names, not secret values</figcaption>
+              <pre><code># Correct
+requiredVars:
+  - OPENAI_API_KEY
+
+mcp:
+  servers:
+    - name: docs
+      transport: http
+      url: https://example.com/mcp
+      bearer_token_env_var: DOCS_MCP_TOKEN
+
+# Incorrect
+requiredVars:
+  - OPENAI_API_KEY=sk-proj-secret
+  - sk-proj-secret</code></pre>
+            </figure>
+
+            <figure class="wide-example">
+              <figcaption>Complete manifest with MCP declarations</figcaption>
+              <pre><code>version: "0.1"
+publisher: "Shiv Jhalani"
+
+instructions:
+  main: "~/.codex/AGENTS.md"
+  includes:
+    - "./style.md"
+
+artifacts:
+  - type: skills
+    path: "~/.codex/skills/code-review"
+  - type: skills
+    path: "~/.codex/skills/refactor"
+
+requiredVars:
+  - OPENAI_API_KEY
+
+mcp:
+  servers:
+    - name: context7
+      transport: stdio
+      command: npx
+      args: ["-y", "@upstash/context7-mcp"]
+      env_vars:
+        - CONTEXT7_API_KEY
+
+    - name: docs
+      transport: http
+      url: https://example.com/mcp
+      http_headers:
+        X-Region: us-east-1
+      bearer_token_env_var: DOCS_MCP_TOKEN
+      header_env_vars:
+        X-API-Key: DOCS_MCP_TOKEN</code></pre>
+            </figure>
+          </div>
+        </div>
+      </section>
+
+      <section id="mcp" class="section section-tint">
+        <div class="section-inner two-column">
+          <div>
+            <p class="eyebrow">MCP examples</p>
+            <h2>Use <code>--client</code> when importing bundles with MCP declarations.</h2>
+            <p>
+              MCP support is host-neutral in the manifest. During import, VAEN writes
+              the selected client format for Codex, Claude Code, or Copilot. Bundles
+              that contain MCP declarations require <code>--client</code> on import.
+            </p>
+          </div>
+          <div class="code-stack">
+            <figure>
+              <figcaption>Client-specific import</figcaption>
+              <pre><code>vaen import /path/to/team-setup.agent --client codex
+vaen import /path/to/team-setup.agent --client claude
+vaen import /path/to/team-setup.agent --client copilot</code></pre>
+            </figure>
+            <figure>
+              <figcaption>Doctor with matching target options</figcaption>
+              <pre><code>vaen doctor --client codex
+vaen doctor --target copilot --client copilot
+vaen doctor --target copilot --target-instructions-file-name copilot-instructions
+vaen doctor --target copilot --target-skills-directory vscode</code></pre>
+            </figure>
+          </div>
+        </div>
+      </section>
+
+      <section id="layout" class="section section-white">
+        <div class="section-inner">
+          <div class="section-heading">
+            <p class="eyebrow">Archive and import layout</p>
+            <h2>Stable bundle paths become materialized repository paths.</h2>
+            <p>
+              Builders can reference source paths from inside or outside a repo,
+              including paths such as <code>~/.codex/AGENTS.md</code>. VAEN stores
+              those files at stable bundle paths and materializes them into the
+              target repository during import.
+            </p>
+          </div>
+
+          <div class="layout-grid">
+            <figure>
+              <figcaption>.agent archive</figcaption>
+              <pre><code>bundle.agent
+|-- oci-layout
+|-- index.json
+`-- blobs/sha256/
+    |-- &lt;manifest blob&gt;
+    |-- &lt;config blob&gt;
+    `-- &lt;layer blob&gt;
+
+Layer payload:
+vaen/metadata.json
+instructions/...
+skills/...
+mcp/...</code></pre>
+            </figure>
+
+            <figure>
+              <figcaption>Imported stored copy</figcaption>
+              <pre><code>.agent/&lt;bundle-name&gt;/
+|-- instructions/
+|-- mcp/
+|-- skills/
+`-- vaen/metadata.json</code></pre>
+            </figure>
+
+            <article class="info-card wide-example">
+              <h3>Activated outputs</h3>
+              <dl>
+                <div>
+                  <dt>Default import for instructions/skills bundles</dt>
+                  <dd>Writes root instructions to <code>AGENTS.md</code> and <code>CLAUDE.md</code>, and mirrors skills to <code>.agent/skills/...</code> and <code>.claude/skills/...</code>.</dd>
+                </div>
+                <div>
+                  <dt><code>--client claude</code></dt>
+                  <dd>Defaults activated outputs to <code>CLAUDE.md</code> and <code>.claude/skills/...</code>.</dd>
+                </div>
+                <div>
+                  <dt><code>--client codex</code></dt>
+                  <dd>Defaults activated outputs to <code>AGENTS.md</code> and <code>.codex/skills/...</code>.</dd>
+                </div>
+                <div>
+                  <dt><code>--client copilot</code></dt>
+                  <dd>Defaults activated outputs to <code>AGENTS.md</code> and <code>.copilot/skills/...</code>.</dd>
+                </div>
+                <div>
+                  <dt>MCP client config</dt>
+                  <dd>Written to <code>.codex/config.toml</code>, <code>.mcp.json</code>, or <code>.github/mcp.json</code> when <code>--client</code> is used.</dd>
+                </div>
+              </dl>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="safety" class="section section-tint">
+        <div class="section-inner">
+          <div class="section-heading">
+            <p class="eyebrow">Safety model</p>
+            <h2>VAEN is designed to move setup, not secrets.</h2>
+            <p>
+              Manifest authors must write credential variable names such as
+              <code>OPENAI_API_KEY</code>, not credential values. Secrets do not
+              belong in manifests, instruction files, skills, references, assets, or
+              any other bundled file.
+            </p>
+          </div>
+
+          <div class="safety-grid">
+            <article class="info-card">
+              <h3>Overwrite protection</h3>
+              <ul>
+                <li>Existing root instruction files block import.</li>
+                <li>Existing <code>.agent/&lt;bundle-name&gt;</code> directories block import.</li>
+                <li>Existing mirrored skill names block import.</li>
+                <li>Existing MCP client config files block import.</li>
+              </ul>
+            </article>
+
+            <article class="info-card">
+              <h3>Credential handling</h3>
+              <ul>
+                <li><code>requiredVars</code> and MCP env fields store variable names only.</li>
+                <li><code>http_headers</code> is for non-secret static HTTP headers.</li>
+                <li>Build rejects obvious declared secret file paths such as <code>.env</code>, <code>*.pem</code>, <code>*.key</code>, and <code>id_rsa</code>.</li>
+                <li>Rejected secret-like paths are reported by path only; VAEN does not print file contents or credential values.</li>
+              </ul>
+            </article>
+
+            <article class="info-card">
+              <h3>Doctor scope</h3>
+              <ul>
+                <li>Reports required environment variable names as warnings.</li>
+                <li>Checks imported structure, expected file placement, and local config syntax.</li>
+                <li>Does not read <code>.env</code> files, keychains, or credential stores.</li>
+                <li>Does not connect to MCP servers or validate auth/API credentials.</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="faq" class="section section-white">
+        <div class="section-inner faq-layout">
+          <div class="section-heading">
+            <p class="eyebrow">FAQ</p>
+            <h2>Details that matter during packaging and import.</h2>
+          </div>
+
+          <div class="faq-list">
+            <details>
+              <summary>What does <code>vaen cleanup</code> delete?</summary>
+              <p>
+                Cleanup deletes <code>.agent/&lt;bundle-name&gt;</code> only. It does
+                not delete root instruction files, skill mirrors, or MCP client config.
+              </p>
+            </details>
+
+            <details>
+              <summary>Can a manifest contain API keys or token values?</summary>
+              <p>
+                No. Manifests store credential variable names only, such as
+                <code>DOCS_MCP_TOKEN</code>. Do not put secret values,
+                <code>NAME=value</code> assignments, password-bearing URLs, or
+                credential files in manifests or bundled files.
+              </p>
+            </details>
+
+            <details>
+              <summary>Does <code>doctor</code> verify authentication?</summary>
+              <p>
+                No. <code>doctor</code> reports required variable names and checks
+                structure, expected file placement, and local config syntax. It does
+                not validate remote APIs, MCP server auth, or credential values.
+              </p>
+            </details>
+
+            <details>
+              <summary>What happens if an output file already exists?</summary>
+              <p>
+                VAEN fails before overwriting existing setup files, including root
+                instruction files, stored bundle directories, mirrored skill names,
+                and MCP client config files.
+              </p>
+            </details>
+
+            <details>
+              <summary>Where do included instruction files go?</summary>
+              <p>
+                On import, VAEN creates root instruction file(s) from
+                <code>instructions.main</code> when the target files do not already
+                exist. Default import writes both <code>AGENTS.md</code> and
+                <code>CLAUDE.md</code>; <code>--client</code> or target overrides can
+                select one output. Extra files listed in
+                <code>instructions.includes</code> stay in
+                <code>.agent/&lt;bundle-name&gt;/instructions/...</code>; they are not
+                concatenated into the root instruction file(s).
+              </p>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-cta" aria-labelledby="github-link">
+        <div class="section-inner cta-panel">
+          <div>
+            <p class="eyebrow">Source</p>
+            <h2 id="github-link">Read the code, examples, and README on GitHub.</h2>
+          </div>
+          <a class="button primary" href="https://github.com/sjhalani7/vaen">github.com/sjhalani7/vaen</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>VAEN is released under the MIT License.</p>
+      <a href="https://github.com/sjhalani7/vaen">GitHub repository</a>
+    </footer>
+  </body>
+</html>
