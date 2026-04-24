@@ -43,6 +43,8 @@ def build_agent(
         archive_path = Path.cwd() / f"{bundle_name}.agent"
     else:
         archive_path = Path(output_path).expanduser()
+        if archive_path.suffix != ".agent":
+            raise BuildError(f"Build output must use .agent extension: {archive_path}")
     archive_path.parent.mkdir(parents=True, exist_ok=True)
 
     layer_bytes = _build_layer_archive(bundle)

@@ -136,7 +136,6 @@ class BuildInspectOciTests(unittest.TestCase):
             self.assertIn("mcp/servers/workspace-files.json", result.stored_paths)
             self.assertIn("mcp/servers/docs-http.json", result.stored_paths)
 
-
 def _read_member(tf: tarfile.TarFile, name: str) -> bytes:
     member = tf.getmember(name)
     extracted = tf.extractfile(member)

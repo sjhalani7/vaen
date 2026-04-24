@@ -951,6 +951,8 @@ def _render_copilot_mcp_server(server: MCPServerPlan) -> dict[str, Any]:
 
 
 def _safe_rel_path(raw_path: str) -> PurePosixPath:
+    if "\\" in raw_path or re.match(r"^[A-Za-z]:", raw_path):
+        raise BundleImportError(f"Archive contains unsafe path: {raw_path}")
     path = PurePosixPath(raw_path)
     if path.is_absolute() or ".." in path.parts:
         raise BundleImportError(f"Archive contains unsafe path: {raw_path}")
