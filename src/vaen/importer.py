@@ -402,6 +402,40 @@ def ensure_root_shims_available(
     return root_paths
 
 
+def ensure_skill_mirrors_available(
+    target_repo: str | Path,
+    plan: ImportPlan,
+    overrides: ImportTargetOverrides | None = None,
+) -> tuple[Path, ...]:
+    """Raise if any configured skill mirror output path already exists."""
+
+    repo_root = resolve_import_target(target_repo)
+    mirror_roots = derive_activated_paths(
+        target_repo=repo_root,
+        overrides=overrides,
+    ).skills_mirror_roots
+
+    existing: list[Path] = []
+    for skill in plan.skills:
+        if len(skill.root.parts) < 2:
+            raise BundleImportError(f"Invalid skill root in import plan: {skill.root}")
+        skill_name = skill.root.parts[1]
+        existing.extend(
+            root / skill_name
+            for root in mirror_roots
+            if (root / skill_name).exists()
+        )
+
+    if existing:
+        rendered = ", ".join(str(path) for path in existing)
+        raise BundleImportError(
+            "Mirrored skill name already exists. "
+            f"Refusing to overwrite: {rendered}"
+        )
+
+    return mirror_roots
+
+
 def prepare_import_plan(archive_path: str | Path) -> ImportPlan:
     """Read a `.agent` archive and return a structured, policy-free plan."""
 
@@ -543,19 +577,19 @@ def mirror_imported_skills(
         target_repo=repo_root,
         overrides=overrides,
     ).skills_mirror_roots
+    ensure_skill_mirrors_available(
+        target_repo=repo_root,
+        plan=plan,
+        overrides=overrides,
+    )
+
+    # Doctor requires the activated mirror roots exist even when no skills were packaged.
+    for root in mirror_roots:
+        root.mkdir(parents=True, exist_ok=True)
 
     for skill in plan.skills:
-        if len(skill.root.parts) < 2:
-            raise BundleImportError(f"Invalid skill root in import plan: {skill.root}")
         skill_name = skill.root.parts[1]
         per_root_skill_paths = tuple(root / skill_name for root in mirror_roots)
-        existing = [path for path in per_root_skill_paths if path.exists()]
-        if existing:
-            rendered = ", ".join(str(path) for path in existing)
-            raise BundleImportError(
-                "Mirrored skill name already exists. "
-                f"Refusing to overwrite: {rendered}"
-            )
         for file_path in skill.files:
             source_file = canonical_root / Path(file_path.as_posix())
             if not source_file.is_file():

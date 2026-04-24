@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import sys
 from pathlib import Path
 from typing import Any, Mapping
@@ -14,6 +15,8 @@ from .importer import (
     cleanup_canonical_bundle,
     create_root_instruction_shims,
     ensure_mcp_client_target_available,
+    ensure_root_shims_available,
+    ensure_skill_mirrors_available,
     extract_canonical_bundle,
     mirror_imported_skills,
     prepare_import_plan,
@@ -66,6 +69,15 @@ def main(argv: list[str] | None = None) -> int:
                 raise BundleImportError(
                     "Import requires --client when the bundle contains MCP servers."
                 )
+            ensure_root_shims_available(
+                target_repo=repo_root,
+                overrides=overrides,
+            )
+            ensure_skill_mirrors_available(
+                target_repo=repo_root,
+                plan=plan,
+                overrides=overrides,
+            )
             mcp_target_paths = None
             if plan.mcp_servers and args.client is not None:
                 mcp_target_paths = ensure_mcp_client_target_available(
@@ -77,23 +89,27 @@ def main(argv: list[str] | None = None) -> int:
                 archive_path=args.archive,
                 target_repo=repo_root,
             )
-            create_root_instruction_shims(
-                canonical_destination=canonical_destination,
-                plan=plan,
-                target_repo=repo_root,
-                overrides=overrides,
-            )
-            mirror_imported_skills(
-                canonical_destination=canonical_destination,
-                plan=plan,
-                target_repo=repo_root,
-                overrides=overrides,
-            )
-            if mcp_target_paths is not None:
-                write_selected_client_mcp_config(
+            try:
+                create_root_instruction_shims(
+                    canonical_destination=canonical_destination,
                     plan=plan,
-                    target_paths=mcp_target_paths,
+                    target_repo=repo_root,
+                    overrides=overrides,
                 )
+                mirror_imported_skills(
+                    canonical_destination=canonical_destination,
+                    plan=plan,
+                    target_repo=repo_root,
+                    overrides=overrides,
+                )
+                if mcp_target_paths is not None:
+                    write_selected_client_mcp_config(
+                        plan=plan,
+                        target_paths=mcp_target_paths,
+                    )
+            except Exception:
+                shutil.rmtree(canonical_destination, ignore_errors=True)
+                raise
             print(f"Import complete. Canonical bundle extracted to {canonical_destination}")
             mcp_env_var_names = _collect_mcp_required_env_var_names(plan.metadata)
             if mcp_env_var_names:
