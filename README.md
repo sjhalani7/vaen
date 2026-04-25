@@ -42,6 +42,10 @@ vaen doctor
 vaen cleanup
 ```
 
+## Quick Start
+
+See [docs/quick-start.md](docs/quick-start.md) for a minimal instructions-only bundle flow.
+
 ## Manifest
 
 `agent.yaml` is the source of truth for a bundle.
@@ -89,12 +93,113 @@ Manifest rules:
 - `instructions.includes` is optional.
 - `artifacts` is a list and may be empty for instructions-only bundles.
 - `skills` is the supported artifact type.
-- `requiredVars` stores environment variable names only, never values.
+- `requiredVars` and MCP env fields store environment variable names only, never values.
+- Manifest authors are responsible for writing names such as `OPENAI_API_KEY`, not credential values such as API keys, tokens, URLs with passwords, or `NAME=value` assignments.
 - `http_headers` stores non-secret static HTTP headers for MCP servers.
 - `mcp` is optional and lives at the top level of the manifest.
 - Source paths may point inside or outside the repo.
 
+Correct:
+
+```yaml
+requiredVars:
+  - OPENAI_API_KEY
+
+mcp:
+  servers:
+    - name: docs
+      transport: http
+      url: https://example.com/mcp
+      bearer_token_env_var: DOCS_MCP_TOKEN
+```
+
+Incorrect:
+
+```yaml
+requiredVars:
+  - OPENAI_API_KEY=sk-proj-secret
+  - sk-proj-secret
+
+mcp:
+  servers:
+    - name: docs
+      transport: http
+      url: https://user:password@example.com/mcp
+      bearer_token_env_var: sk-proj-secret
+```
+
 MCP support is host-neutral in the manifest. During import, VAEN writes the selected client format for Codex, Claude Code, or Copilot.
+
+## YAML Examples
+
+Instructions only:
+
+```yaml
+version: "0.1"
+publisher: "Your Name"
+
+instructions:
+  main: "./AGENTS.md"
+
+artifacts: []
+```
+
+- `instructions.main` points to `AGENTS.md` or another main agent instruction file.
+
+Instructions with skills:
+
+```yaml
+version: "0.1"
+publisher: "Your Name"
+
+instructions:
+  main: "./AGENTS.md"
+  includes:
+    - "./style.md"
+
+artifacts:
+  - type: skills
+    path: "./skills/code-review"
+  - type: skills
+    path: "./skills/refactor"
+```
+
+- `instructions.includes` is for extra Markdown instruction/context files.
+- Each `artifacts` entry points to one skill directory.
+
+MCP servers:
+
+```yaml
+version: "0.1"
+publisher: "Your Name"
+
+instructions:
+  main: "./AGENTS.md"
+
+artifacts: []
+
+mcp:
+  servers:
+    - name: context7
+      transport: stdio
+      command: npx
+      args: ["-y", "@upstash/context7-mcp"]
+      env_vars:
+        - CONTEXT7_API_KEY
+    - name: figma
+      transport: http
+      url: "https://mcp.figma.com/mcp"
+      bearer_token_env_var: FIGMA_OAUTH_TOKEN
+      http_headers:
+        X-Figma-Region: us-east-1
+```
+
+- `name` is the local MCP server name.
+- `transport` is either `stdio` or `http`.
+- `command` and `args` define how stdio MCP servers are launched.
+- `url` defines the HTTP MCP endpoint.
+- `env_vars` and `bearer_token_env_var` contain environment variable names only, never secret values.
+- `http_headers` contains non-secret static headers.
 
 ## Typical Flow
 
@@ -122,6 +227,8 @@ You can choose the archive name:
 vaen build -f examples/synthetic-fixture/agent.yaml -o shiv-setup.agent
 ```
 
+Explicit output paths must end in `.agent`.
+
 ### 3. Inspect
 
 ```bash
@@ -146,7 +253,13 @@ vaen import /path/to/synthetic-fixture.agent --client claude
 vaen import /path/to/synthetic-fixture.agent --client copilot
 ```
 
-Default import writes root instructions to `AGENTS.md` and `CLAUDE.md`, and mirrors skills to `.agent/skills/...` and `.claude/skills/...`.
+Default import (no `--client` and no target override flags) writes root instructions to `AGENTS.md` and `CLAUDE.md`, and mirrors skills to `.agent/skills/...` and `.claude/skills/...`.
+
+If `--client` is provided and none of `--target`, `--target-instructions-file-name`, `--target-skills-directory` are provided, activated outputs default to the client:
+
+- `--client claude`: `CLAUDE.md` and `.claude/skills/...`
+- `--client codex`: `AGENTS.md` and `.codex/skills/...`
+- `--client copilot`: `AGENTS.md` and `.copilot/skills/...`
 
 To target another agent directory:
 
@@ -252,7 +365,9 @@ VAEN fails before overwriting existing setup files.
 - Existing mirrored skill names block import.
 - Existing MCP client config files block import.
 
-Build also rejects obvious secret file paths such as `.env`, `.env.*`, `*.pem`, `*.key`, and `id_rsa`. Detected secret values are never printed.
+Skill directories should contain only instructions, scripts, references, and assets needed by the agent. Do not place credential files such as `.env`, `.env.*`, private keys, or credential stores inside a skill directory before building a bundle.
+
+Build rejects obvious declared secret file paths such as `.env`, `.env.*`, `*.pem`, `*.key`, and `id_rsa`. Detected secret values are never printed.
 
 Credential handling is metadata-only:
 
