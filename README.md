@@ -6,7 +6,7 @@ It takes an `agent.yaml` manifest, bundles instructions, skills, and project-sco
 
 ## Demo
 
-Watch the 45-second flow: [docs/assets/vaen-demo.mp4](docs/assets/vaen-demo.mp4)
+Watch the 24-second flow: [docs/assets/vaen-demo.mp4](docs/assets/vaen-demo.mp4)
 
 ```bash
 vaen validate -f agent.yaml
