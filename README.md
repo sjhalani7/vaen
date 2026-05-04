@@ -4,6 +4,18 @@ VAEN is a portable CLI for packaging and importing agentic coding setups.
 
 It takes an `agent.yaml` manifest, bundles instructions, skills, and project-scoped MCP declarations into an OCI-backed `.agent` archive, and imports that setup into another repository without transporting secrets.
 
+## Demo
+
+Watch the 45-second flow: [docs/assets/vaen-demo.mp4](docs/assets/vaen-demo.mp4)
+
+```bash
+vaen validate -f agent.yaml
+vaen build -f agent.yaml -o team-setup.agent
+vaen inspect team-setup.agent
+vaen import team-setup.agent --client codex
+vaen doctor --client codex
+```
+
 ## What VAEN Packages
 
 VAEN packages configuration and authoring files, not runtime environments.
@@ -14,6 +26,18 @@ VAEN packages configuration and authoring files, not runtime environments.
 - Bundle metadata used for import, inspection, and validation
 
 VAEN never packages credential values, `.env` files, private keys, OAuth state, or MCP server implementations.
+
+## Why Not Just Zip the Files?
+
+A zip file can move files, but it does not explain what the setup is, what should be imported, where files should land, or which credential variable names the receiver must provide locally.
+
+VAEN keeps that handoff explicit:
+
+- `agent.yaml` declares the instructions, skills, MCP declarations, and required variable names.
+- `vaen validate` catches malformed manifests before sharing.
+- `vaen inspect` lets the receiver review bundle contents before import.
+- `vaen import` materializes the setup into predictable client-specific locations.
+- `vaen doctor` checks the imported structure without reading credential values.
 
 ## Install
 

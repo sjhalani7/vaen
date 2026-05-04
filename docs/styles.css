@@ -276,6 +276,7 @@ dd {
 
 .hero-grid,
 .intro-grid,
+.demo-layout,
 .two-column {
   display: grid;
   grid-template-columns: minmax(0, 0.92fr) minmax(0, 1fr);
@@ -291,6 +292,11 @@ dd {
 
 .hero-copy {
   max-width: 840px;
+}
+
+.hero-showcase {
+  display: grid;
+  gap: 1rem;
 }
 
 .hero-lede {
@@ -348,6 +354,37 @@ dd {
   box-shadow: none;
 }
 
+.demo-layout {
+  align-items: center;
+}
+
+.demo-video {
+  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.demo-video video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #050807;
+  object-fit: cover;
+}
+
+.demo-video figcaption {
+  margin: 0;
+  padding: 0.85rem 1rem;
+  background: #0d1820;
+  border-top: 1px solid var(--line);
+}
+
+.hero-demo video {
+  aspect-ratio: 16 / 9;
+}
+
 .card-grid,
 .code-stack,
 .example-grid,
@@ -360,6 +397,7 @@ dd {
 
 .hero-grid > *,
 .intro-grid > *,
+.demo-layout > *,
 .two-column > *,
 .card-grid > *,
 .code-stack > *,
@@ -374,6 +412,10 @@ dd {
 
 .card-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.compact-card-grid {
+  align-self: start;
 }
 
 .info-card,
@@ -520,6 +562,7 @@ dd {
 
   .hero-grid,
   .intro-grid,
+  .demo-layout,
   .two-column,
   .faq-layout {
     grid-template-columns: 1fr;
@@ -551,6 +594,7 @@ dd {
 
   .hero-grid,
   .intro-grid,
+  .demo-layout,
   .two-column,
   .faq-layout {
     gap: 2rem;

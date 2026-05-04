@@ -18,6 +18,7 @@
       </a>
       <nav class="site-nav" aria-label="Primary navigation">
         <a href="#workflow">Workflow</a>
+        <a href="#demo">Demo</a>
         <a href="#quick-start">Quick start</a>
         <a href="#examples">YAML</a>
         <a href="#mcp">MCP</a>
@@ -50,19 +51,49 @@
             </p>
             <div class="hero-actions" aria-label="Primary actions">
               <a class="button primary" href="#quick-start">Start with a bundle</a>
+              <a class="button secondary" href="#demo">Watch the demo</a>
               <a class="button secondary" href="https://github.com/sjhalani7/vaen">View GitHub repo</a>
             </div>
           </div>
 
-          <aside class="command-card" aria-label="VAEN command summary">
-            <pre><code>pipx install git+https://github.com/sjhalani7/vaen.git
+          <div class="hero-showcase">
+            <figure class="demo-video hero-demo">
+              <video controls preload="metadata" aria-label="VAEN terminal demo">
+                <source src="assets/vaen-demo.mp4" type="video/mp4">
+              </video>
+              <figcaption>45-second terminal demo</figcaption>
+            </figure>
+
+            <aside class="command-card" aria-label="VAEN command summary">
+              <pre><code>pipx install git+https://github.com/sjhalani7/vaen.git
 
 vaen validate -f agent.yaml
 vaen build -f agent.yaml -o team-setup.agent
 vaen inspect team-setup.agent
 vaen import team-setup.agent --client codex
 vaen doctor --client codex</code></pre>
-          </aside>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <section id="demo" class="section section-white">
+        <div class="section-inner demo-layout">
+          <div>
+            <p class="eyebrow">45-second demo</p>
+            <h2>Build, inspect, import, and verify one agent setup.</h2>
+            <p>
+              The demo shows the core handoff: a manifest becomes a portable
+              <code>.agent</code> archive, the archive is inspected before trust, and
+              the target repo is checked after import.
+            </p>
+          </div>
+          <figure class="demo-video">
+            <video controls preload="metadata" aria-label="VAEN terminal demo">
+              <source src="assets/vaen-demo.mp4" type="video/mp4">
+            </video>
+            <figcaption>agent.yaml -> validate -> build -> inspect -> import -> doctor</figcaption>
+          </figure>
         </div>
       </section>
 
@@ -114,6 +145,40 @@ vaen doctor --client codex</code></pre>
                 <li>Builders should leave out OAuth state, keychains, and local secret stores</li>
                 <li>MCP server implementations are referenced, not bundled</li>
                 <li>Dependency caches and runtime environments stay outside the bundle</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="why-not-zip" class="section section-tint">
+        <div class="section-inner two-column">
+          <div>
+            <p class="eyebrow">Why not zip files?</p>
+            <h2>A zip moves bytes. VAEN moves an inspectable setup.</h2>
+            <p>
+              A zip file can collect files, but it does not explain what the setup
+              is, where each file should land, which client it targets, or which
+              credential variable names the receiver must provide locally.
+            </p>
+          </div>
+          <div class="card-grid compact-card-grid">
+            <article class="info-card">
+              <h3>Zip handoff</h3>
+              <ul>
+                <li>Receiver guesses which files matter.</li>
+                <li>Placement rules live in a message or README note.</li>
+                <li>Secret files can be mixed in by accident.</li>
+                <li>There is no standard inspect or doctor step.</li>
+              </ul>
+            </article>
+            <article class="info-card">
+              <h3>VAEN handoff</h3>
+              <ul>
+                <li><code>agent.yaml</code> declares the setup.</li>
+                <li><code>inspect</code> shows bundle contents before import.</li>
+                <li>Credential variable names stay separate from values.</li>
+                <li><code>doctor</code> checks the materialized repo structure.</li>
               </ul>
             </article>
           </div>
