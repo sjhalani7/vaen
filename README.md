@@ -70,6 +70,19 @@ vaen cleanup
 
 See [docs/quick-start.md](docs/quick-start.md) for a minimal instructions-only bundle flow.
 
+## Public Agent Setup Packages
+
+The [`dist/agents/`](dist/agents/) directory contains ready-to-import `.agent` archives for popular, reputable public agent setups.
+
+Current packages:
+
+- [`mattpocock-skills.agent`](dist/agents/mattpocock-skills.agent) — complete promoted skill set from `mattpocock/skills`
+- [`mattpocock-engineering.agent`](dist/agents/mattpocock-engineering.agent) — engineering skills
+- [`mattpocock-productivity.agent`](dist/agents/mattpocock-productivity.agent) — productivity skills
+- [`mattpocock-misc.agent`](dist/agents/mattpocock-misc.agent) — misc utility skills
+
+See [`dist/agents/README.md`](dist/agents/README.md) for import commands and attribution.
+
 ## Manifest
 
 `agent.yaml` is the source of truth for a bundle.
